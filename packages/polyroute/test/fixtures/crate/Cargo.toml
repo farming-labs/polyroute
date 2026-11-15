@@ -1,0 +1,14 @@
+[package]
+name = "polyroute-fixture-crate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "route"
+path = "route.rs"
+
+[dependencies]
+wstd = "0.5"
+
+[workspace]

@@ -1,0 +1,23 @@
+{
+  "name": "polyroute-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @farming-labs/polyroute build",
+    "test": "pnpm --filter @farming-labs/polyroute test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:packed": "node scripts/smoke.mjs --packed"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.9.0"
+}

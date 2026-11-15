@@ -1,0 +1,60 @@
+{
+  "name": "@farming-labs/polyroute",
+  "version": "0.0.0",
+  "description": "Write web routes in Rust and serve them as standard fetch handlers.",
+  "keywords": [
+    "fetch",
+    "rust",
+    "vite",
+    "vite-plugin",
+    "wasi",
+    "wasm",
+    "webassembly"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/farming-labs/polyroute.git",
+    "directory": "packages/polyroute"
+  },
+  "files": [
+    "dist",
+    "modules.d.ts"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./modules": {
+      "types": "./modules.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco-transpile": "^0.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
