@@ -3,3 +3,5 @@ export { default as panic } from "./panic/route.rs";
 export { default as crate } from "./crate/route.rs";
 export { default as python } from "./python/echo/route.py";
 export { default as pythonRaise } from "./python/raise/route.py";
+export { default as go } from "./go/echo/route.go";
+export { default as goPanic } from "./go/panic/route.go";

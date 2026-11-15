@@ -1,12 +1,13 @@
 import path from "node:path";
 import { component } from "./component.js";
+import { go } from "./go.js";
 import { python } from "./python.js";
 import { rust } from "./rust.js";
 import type { Language } from "./types.js";
 
 export type { Language, RouteBuildInput, RouteBuildResult } from "./types.js";
 
-export const LANGUAGES: readonly Language[] = [rust, python, component];
+export const LANGUAGES: readonly Language[] = [rust, go, python, component];
 
 export function findLanguage(file: string): Language | undefined {
   const extension = path.extname(file);
