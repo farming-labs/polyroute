@@ -19,7 +19,9 @@
   },
   "files": [
     "dist",
-    "modules.d.ts"
+    "modules.d.ts",
+    "python",
+    "wit"
   ],
   "type": "module",
   "sideEffects": false,

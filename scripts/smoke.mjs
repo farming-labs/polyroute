@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = path.join(repo, "packages/polyroute");
-const exampleDir = path.join(repo, "examples/rust-route");
+const exampleDir = path.join(repo, "examples/polyglot");
 const packed = process.argv.includes("--packed");
 
 function run(command, args, cwd) {
@@ -28,7 +28,7 @@ function run(command, args, cwd) {
 
 async function prepareWorkspaceApp() {
   run("pnpm", ["--filter", "@farming-labs/polyroute", "build"], repo);
-  run("pnpm", ["--filter", "polyroute-example-rust-route", "build"], repo);
+  run("pnpm", ["--filter", "polyroute-example-polyglot", "build"], repo);
   return { appDir: exampleDir, cleanup: async () => {} };
 }
 
@@ -105,6 +105,21 @@ const checks = [
     method: "DELETE",
     status: 405,
     body: "",
+  },
+  {
+    name: "Python route uses the standard library",
+    path: "/api/stats",
+    method: "POST",
+    send: "[1, 2, 3, 4]",
+    status: 200,
+    body: '{"count":4,"mean":2.5,"median":2.5}',
+  },
+  {
+    name: "Python route rejects bad input",
+    path: "/api/stats",
+    method: "POST",
+    send: '"nope"',
+    status: 400,
   },
   { name: "unknown path", path: "/api/missing", status: 404 },
 ];

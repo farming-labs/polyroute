@@ -1,0 +1,19 @@
+package polyroute:route;
+
+/// What a polyroute route can import and must export. It's `wasi:http/proxy`
+/// without `wasi:http/outgoing-handler`, which the embedded runtime doesn't
+/// provide yet.
+world route {
+  import wasi:io/poll@0.2.12;
+  import wasi:io/error@0.2.12;
+  import wasi:io/streams@0.2.12;
+  import wasi:clocks/monotonic-clock@0.2.12;
+  import wasi:clocks/wall-clock@0.2.12;
+  import wasi:random/random@0.2.12;
+  import wasi:cli/stdout@0.2.12;
+  import wasi:cli/stderr@0.2.12;
+  import wasi:cli/stdin@0.2.12;
+  import wasi:http/types@0.2.12;
+
+  export wasi:http/incoming-handler@0.2.12;
+}

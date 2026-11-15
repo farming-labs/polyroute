@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -64,5 +64,35 @@ it("serves a .rs route in dev and rebuilds it when the file changes", async () =
   const after = await loadRoute();
   expect(await (await after.fetch(new Request("http://localhost/dev"))).text()).toContain(
     "verb=GET\n",
+  );
+});
+
+it("rebuilds a Python route when a module next to it changes", async () => {
+  const dir = path.join(root, "py");
+  await mkdir(dir);
+  for (const file of ["route.py", "greeting.py"]) {
+    await copyFile(path.join(fixturesDir, "python", "echo", file), path.join(dir, file));
+  }
+  const load = async () =>
+    ((await server.ssrLoadModule("/py/route.py")) as { default: WasiHttpRoute }).default;
+
+  const before = await load();
+  expect(await (await before.fetch(new Request("http://localhost/"))).text()).toContain(
+    "hello from a sibling module\n",
+  );
+
+  const sibling = path.join(dir, "greeting.py");
+  const changed = new Promise<void>((resolve) => {
+    onSsrUpdate = (file) => {
+      if (path.resolve(file) === sibling) resolve();
+    };
+  });
+  const source = await readFile(sibling, "utf8");
+  await writeFile(sibling, source.replace("a sibling module", "an edited sibling"));
+  await changed;
+
+  const after = await load();
+  expect(await (await after.fetch(new Request("http://localhost/"))).text()).toContain(
+    "hello from an edited sibling\n",
   );
 });

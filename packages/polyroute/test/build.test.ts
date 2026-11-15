@@ -17,6 +17,8 @@ interface ServerEntry {
   echo: WasiHttpRoute;
   panic: WasiHttpRoute;
   crate: WasiHttpRoute;
+  python: WasiHttpRoute;
+  pythonRaise: WasiHttpRoute;
 }
 
 let outDir: string;
@@ -102,6 +104,49 @@ describe("production build", () => {
     await expect(routes.panic.fetch(new Request("http://localhost/"))).rejects.toThrow();
     const response = await routes.echo.fetch(new Request("http://localhost/after-panic"));
     expect(await response.text()).toContain("path=/after-panic\n");
+  });
+});
+
+describe("Python routes", () => {
+  it("serves GET with the path, query, headers, and a sibling module", async () => {
+    const response = await routes.python.fetch(
+      new Request("http://localhost/api/py?name=farm", { headers: { "x-greeting": "selam" } }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-served-by")).toBe("python");
+    expect(await response.text()).toBe(
+      "method=GET\npath=/api/py\nname=farm\ngreeting=selam\nhello from a sibling module\n",
+    );
+  });
+
+  it("reads a JSON body and returns the status the route chose", async () => {
+    const response = await routes.python.fetch(
+      new Request("http://localhost/api/py", { method: "POST", body: '{"a":1}' }),
+    );
+    expect(response.status).toBe(201);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(await response.json()).toEqual({ received: { a: 1 }, length: 7 });
+  });
+
+  it("answers HEAD from GET and other methods with 405 and allow", async () => {
+    const head = await routes.python.fetch(
+      new Request("http://localhost/api/py", { method: "HEAD" }),
+    );
+    expect(head.status).toBe(200);
+    expect(head.body).toBeNull();
+
+    const remove = await routes.python.fetch(
+      new Request("http://localhost/api/py", { method: "DELETE" }),
+    );
+    expect(remove.status).toBe(405);
+    expect(remove.headers.get("allow")).toBe("GET, HEAD, POST");
+  });
+
+  it("turns an exception into ROUTE_TRAPPED that carries the traceback", async () => {
+    await expect(routes.pythonRaise.fetch(new Request("http://localhost/"))).rejects.toMatchObject({
+      code: "ROUTE_TRAPPED",
+      message: expect.stringContaining("RuntimeError: fixture route raised on purpose"),
+    });
   });
 });
 
