@@ -44,6 +44,7 @@ export async function transpileRoute(
   wasm: Uint8Array,
   label: string,
   cacheDir: string,
+  handlerHint: string,
 ): Promise<TranspiledRoute> {
   const key = createHash("sha256")
     .update(`${CACHE_FORMAT}\0${getTranspilerVersion()}\0`)
@@ -70,7 +71,7 @@ export async function transpileRoute(
     );
   }
 
-  checkExports(result.exports, label);
+  checkExports(result.exports, label, handlerHint);
   checkImports(result.imports, label);
 
   const decoder = new TextDecoder();
@@ -93,14 +94,14 @@ export async function transpileRoute(
   return { key, ...entry };
 }
 
-function checkExports(exports: Array<[string, string]>, label: string): void {
+function checkExports(exports: Array<[string, string]>, label: string, hint: string): void {
   const handler = exports
     .map(([name]) => parseInterfaceName(name))
     .find((name) => name.name === HTTP_HANDLER_INTERFACE && isSupportedVersion(name.version));
   if (handler === undefined) {
     throw new PolyrouteError(
       "MISSING_HANDLER",
-      `\`${label}\` doesn't export a \`${HTTP_HANDLER_INTERFACE}@0.2\` handler. Mark the route's entry point with \`#[wstd::http_server]\`.`,
+      `\`${label}\` doesn't export a \`${HTTP_HANDLER_INTERFACE}@0.2\` handler. ${hint}`,
     );
   }
 }
