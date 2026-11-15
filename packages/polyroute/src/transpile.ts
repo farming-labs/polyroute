@@ -114,6 +114,6 @@ function checkImports(imports: string[], label: string): void {
   const list = missing.map((name) => `\`${name}\``).join(", ");
   throw new PolyrouteError(
     "UNSUPPORTED_IMPORT",
-    `\`${label}\` imports ${list}, which polyroute's embedded runtime doesn't provide. Routes can use stdout and stderr, clocks, random numbers, and \`wasi:http/types\`. Outbound HTTP and the filesystem aren't available yet, so remove the code that needs them.`,
+    `\`${label}\` imports ${list}, which polyroute's embedded runtime doesn't provide. Routes can use stdout and stderr, clocks, random numbers, and \`wasi:http/types\`, and the filesystem and sockets are linked with nothing behind them. Outbound HTTP isn't available yet, so remove the code that needs it.`,
   );
 }

@@ -18,7 +18,7 @@ The built server is plain JavaScript. The machine that runs it needs Node, nothi
 
 - **It doesn't make routes faster.** A Rust route runs inside V8 here, with a fresh instance per request. Today that costs far more per request than a TypeScript route. See [Performance](#performance).
 - **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
-- **Routes can't make outbound HTTP requests or touch the filesystem yet.** The build fails if a route needs them. See [What a route can use](#what-a-route-can-use).
+- **Routes can't make outbound HTTP requests yet.** The build fails if a route needs them. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [What a route can use](#what-a-route-can-use).
 
 ## Quick start
 
@@ -128,12 +128,14 @@ Core Wasm modules aren't components, so polyroute leaves them, and imports with 
 | Available                                                             | Not yet                                                 |
 | --------------------------------------------------------------------- | ------------------------------------------------------- |
 | Request method, path, query, headers, and body                        | Outbound HTTP (`wasi:http/outgoing-handler`)            |
-| Responses with any status (200 to 599), headers, and body             | Filesystem                                              |
-| `stdout` and `stderr`, forwarded to `console.log` and `console.error` | Sockets                                                 |
+| Responses with any status (200 to 599), headers, and body             | Files: there are no preopened directories               |
+| `stdout` and `stderr`, forwarded to `console.log` and `console.error` | Sockets: every call returns `access-denied`             |
 | Clocks and timers                                                     | Environment variables (routes see an empty environment) |
 | Random numbers                                                        | Response trailers                                       |
 
-The build checks every interface a route imports. If one isn't available, the build fails and names it:
+Language runtimes such as CPython and Go's `syscall` package import the filesystem and sockets at startup, whether or not the route uses them. polyroute links those interfaces with nothing behind them, so the route starts but can't open a file or a connection.
+
+The build checks every other interface a route imports. If one isn't available, the build fails and names it:
 
 ```
 `app/api/fetch/route.rs` imports `wasi:http/outgoing-handler`, which polyroute's
@@ -146,19 +148,19 @@ Hop-by-hop headers (`connection`, `keep-alive`, `transfer-encoding`, `upgrade`, 
 
 Every error polyroute throws is a `PolyrouteError` with a stable `code`:
 
-| Code                         | When                                                                |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `TOOLCHAIN_MISSING`          | `cargo` isn't on `PATH`                                             |
-| `TARGET_MISSING`             | The `wasm32-wasip2` target isn't installed                          |
-| `BUILD_FAILED`               | The route doesn't compile; the message includes cargo's diagnostics |
-| `CLIENT_IMPORT`              | A route was imported from browser code                              |
-| `UNSUPPORTED_IMPORT`         | The route needs an interface the runtime doesn't provide            |
-| `MISSING_HANDLER`            | The component doesn't export `wasi:http/incoming-handler`           |
-| `ROUTE_INSTANTIATION_FAILED` | The compiled route couldn't be instantiated                         |
-| `ROUTE_TRAPPED`              | The route panicked or trapped; the message includes the panic text  |
-| `ROUTE_NO_RESPONSE`          | The route returned without responding                               |
-| `ROUTE_ERROR`                | The route responded with a `wasi:http` error code                   |
-| `ROUTE_INVALID_RESPONSE`     | The response can't be sent, for example an unfinished body          |
+| Code                         | When                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `TOOLCHAIN_MISSING`          | `cargo` isn't on `PATH`                                                 |
+| `TARGET_MISSING`             | The `wasm32-wasip2` target isn't installed                              |
+| `BUILD_FAILED`               | The route doesn't compile; the message includes cargo's diagnostics     |
+| `CLIENT_IMPORT`              | A route was imported from browser code                                  |
+| `UNSUPPORTED_IMPORT`         | The route needs an interface the runtime doesn't provide                |
+| `MISSING_HANDLER`            | The component doesn't export `wasi:http/incoming-handler`               |
+| `ROUTE_INSTANTIATION_FAILED` | The compiled route couldn't be instantiated                             |
+| `ROUTE_TRAPPED`              | The route panicked, raised, or trapped; the message includes its stderr |
+| `ROUTE_NO_RESPONSE`          | The route returned without responding                                   |
+| `ROUTE_ERROR`                | The route responded with a `wasi:http` error code                       |
+| `ROUTE_INVALID_RESPONSE`     | The response can't be sent, for example an unfinished body              |
 
 A trapped request throws from `fetch`, so your framework's error handling decides what the client sees.
 

@@ -3,6 +3,7 @@
 // always ready and the guest's `handle` export runs to completion synchronously.
 
 import type { SUPPORTED_INTERFACES } from "../interfaces.js";
+import { createDeniedImports } from "./denied.js";
 
 type StreamError = { tag: "closed" };
 type HeaderError = { tag: "invalid-syntax" } | { tag: "forbidden" } | { tag: "immutable" };
@@ -247,7 +248,16 @@ export class OutputStream {
 }
 
 /** A stdout/stderr sink that forwards complete lines to `log`. */
-export function createLineSink(log: (line: string) => void): StreamSink {
+export interface LineSink extends StreamSink {
+  /** Forwards a final line that has no trailing newline. */
+  end(): void;
+}
+
+/**
+ * Forwards output line by line. A guest flush doesn't end the line: CPython
+ * flushes stderr after every write, which would split a traceback mid-line.
+ */
+export function createLineSink(log: (line: string) => void): LineSink {
   const decoder = new TextDecoder();
   let pending = "";
   return {
@@ -260,7 +270,9 @@ export function createLineSink(log: (line: string) => void): StreamSink {
         newline = pending.indexOf("\n");
       }
     },
-    flush() {
+    flush() {},
+    end() {
+      pending += decoder.decode();
       if (pending.length > 0) {
         log(pending);
         pending = "";
@@ -597,6 +609,21 @@ function randomU64(): bigint {
   return crypto.getRandomValues(new BigUint64Array(1))[0] ?? 0n;
 }
 
+// The outbound half of wasi:http/types. Runtimes that bind the whole interface,
+// such as componentize-py, reference these classes at instantiation. Without
+// `wasi:http/outgoing-handler` there's nothing to send a request with, so
+// constructing one fails with a clear message instead of a missing import.
+
+class OutboundUnsupported {
+  constructor() {
+    throw new Error("polyroute's embedded runtime doesn't support outbound HTTP requests yet.");
+  }
+}
+class OutgoingRequest extends OutboundUnsupported {}
+class RequestOptions extends OutboundUnsupported {}
+class IncomingResponse {}
+class FutureIncomingResponse {}
+
 // wasi:cli
 
 class TerminalInput {}
@@ -612,6 +639,7 @@ export type HostImports = Record<(typeof SUPPORTED_INTERFACES)[number], Record<s
 /** Builds the import object for one instance. Classes are shared; sinks are per request. */
 export function createImports(context: HostContext): HostImports {
   return {
+    ...createDeniedImports(),
     "wasi:cli/environment": {
       getEnvironment: (): Array<[string, string]> => [],
       getArguments: (): string[] => [],
@@ -673,6 +701,10 @@ export function createImports(context: HostContext): HostImports {
       OutgoingResponse,
       OutgoingBody,
       ResponseOutparam,
+      OutgoingRequest,
+      RequestOptions,
+      IncomingResponse,
+      FutureIncomingResponse,
       httpErrorCode: (_error: IoError): ErrorCode | undefined => undefined,
     },
   };

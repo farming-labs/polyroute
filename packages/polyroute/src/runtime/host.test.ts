@@ -30,6 +30,33 @@ describe("createImports", () => {
       [...SUPPORTED_INTERFACES].sort(),
     );
   });
+
+  it("links the filesystem and sockets with nothing behind them", () => {
+    const sink = createLineSink(() => {});
+    const imports = createImports({ stdout: sink, stderr: sink }) as Record<
+      string,
+      Record<string, (...args: unknown[]) => unknown>
+    >;
+    expect(imports["wasi:filesystem/preopens"]!.getDirectories!()).toEqual([]);
+    expect(thrown(() => imports["wasi:sockets/tcp-create-socket"]!.createTcpSocket!("ipv4"))).toBe(
+      "access-denied",
+    );
+    expect(thrown(() => imports["wasi:sockets/udp-create-socket"]!.createUdpSocket!("ipv4"))).toBe(
+      "access-denied",
+    );
+    expect(
+      thrown(() => imports["wasi:sockets/ip-name-lookup"]!.resolveAddresses!(null, "example.com")),
+    ).toBe("access-denied");
+  });
+
+  it("refuses to construct an outbound request", () => {
+    const sink = createLineSink(() => {});
+    const types = createImports({ stdout: sink, stderr: sink })["wasi:http/types"] as Record<
+      string,
+      new () => unknown
+    >;
+    expect(() => new types.OutgoingRequest!()).toThrow(/doesn't support outbound HTTP/);
+  });
 });
 
 describe("Fields", () => {
@@ -124,13 +151,23 @@ describe("IncomingRequest", () => {
 });
 
 describe("createLineSink", () => {
-  it("forwards complete lines and flushes the remainder", () => {
+  it("forwards complete lines, and the remainder only at the end", () => {
     const lines: string[] = [];
     const sink = createLineSink((line) => lines.push(line));
     sink.write(bytes("first\nsec"));
     sink.write(bytes("ond\nthird"));
     expect(lines).toEqual(["first", "second"]);
-    sink.flush();
+    sink.end();
     expect(lines).toEqual(["first", "second", "third"]);
+  });
+
+  it("keeps a line whole when the guest flushes between writes", () => {
+    const lines: string[] = [];
+    const sink = createLineSink((line) => lines.push(line));
+    for (const part of ["RuntimeError", ": ", "boom\n"]) {
+      sink.write(bytes(part));
+      sink.flush();
+    }
+    expect(lines).toEqual(["RuntimeError: boom"]);
   });
 });
