@@ -1,8 +1,8 @@
 # polyroute
 
-**Write web routes in Rust and serve them as standard `fetch` handlers.**
+**Write web routes in other languages and serve them as standard `fetch` handlers.**
 
-polyroute is a Vite plugin. Put a `route.rs` next to your `route.ts`, and the import becomes a module that exports `(request: Request) => Promise<Response>`, the same shape as a TypeScript route handler. The Rust code compiles to a WebAssembly component, which polyroute transpiles to JavaScript and bundles into your server build.
+polyroute is a Vite plugin. Put a `route.rs` next to your `route.ts`, and the import becomes a module that exports `(request: Request) => Promise<Response>`, the same shape as a TypeScript route handler. The Rust code compiles to a WebAssembly component, which polyroute transpiles to JavaScript and bundles into your server build. A component built in any other language works too, imported as a prebuilt `.wasm` file.
 
 ```
 app/api/
@@ -12,12 +12,12 @@ app/api/
 
 The built server is plain JavaScript. The machine that runs it needs Node, nothing else: no Rust toolchain, no wasmtime, no extra packages.
 
-> **Status:** early. Rust is the only language, and the in-process runtime described below is the only way to run a route. Not published to npm yet.
+> **Status:** early. polyroute builds Rust routes from source, and routes in other languages can come in as prebuilt components. The in-process runtime described below is the only way to run a route. Not published to npm yet.
 
 ## What it doesn't do
 
 - **It doesn't make routes faster.** A Rust route runs inside V8 here, with a fresh instance per request. Today that costs far more per request than a TypeScript route. See [Performance](#performance).
-- **It isn't a framework.** It turns a `.rs` file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
+- **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
 - **Routes can't make outbound HTTP requests or touch the filesystem yet.** The build fails if a route needs them. See [What a route can use](#what-a-route-can-use).
 
 ## Quick start
@@ -75,7 +75,7 @@ For types, reference the module declarations once:
 
 [`examples/rust-route`](examples/rust-route) is a complete app: a TypeScript route and two Rust routes behind a small file router, with a dev server and a production build.
 
-## What a `.rs` module exports
+## What a route module exports
 
 | Export                                                     | Value                                                                    |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -83,7 +83,7 @@ For types, reference the module declarations once:
 | `fetch`                                                    | The fetch handler                                                        |
 | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` | The same fetch handler, for frameworks that look up a handler per method |
 
-The Rust code receives every method and decides what to do with it.
+Every method reaches the route, and the route decides what to do with it.
 
 ## Dependencies
 
@@ -110,9 +110,15 @@ serde_json = "1"
 
 polyroute builds that crate as it is. In dev, editing any of its source files rebuilds the route.
 
+## Prebuilt components
+
+Import a `.wasm` file that is a component exporting `wasi:http/incoming-handler@0.2`, and it gets the same exports as a `.rs` route. That's the way in for languages polyroute doesn't build itself, and for components built elsewhere in your pipeline. polyroute checks the component's imports at build time, just like a route it built itself. So far only components built by cargo have been tested this way.
+
+Core Wasm modules aren't components, so polyroute leaves them, and imports with a Vite query such as `?init` or `?url`, to Vite.
+
 ## How it works
 
-1. `cargo build --release --target wasm32-wasip2` compiles the route. All routes share one target directory under Vite's cache directory (`node_modules/.vite/polyroute`), so dependencies compile once.
+1. `cargo build --release --target wasm32-wasip2` compiles a Rust route. All Rust routes share one target directory under Vite's cache directory (`node_modules/.vite/polyroute`), so dependencies compile once. A prebuilt component is read as it is.
 2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. The output is cached by content hash.
 3. The bindings and the base64-encoded core modules are bundled into your server build, together with polyroute's runtime.
 4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. Each request gets a fresh instance, so nothing leaks between requests and a panic can't poison later ones.
@@ -145,9 +151,9 @@ Every error polyroute throws is a `PolyrouteError` with a stable `code`:
 | `TOOLCHAIN_MISSING`          | `cargo` isn't on `PATH`                                             |
 | `TARGET_MISSING`             | The `wasm32-wasip2` target isn't installed                          |
 | `BUILD_FAILED`               | The route doesn't compile; the message includes cargo's diagnostics |
-| `CLIENT_IMPORT`              | A `.rs` route was imported from browser code                        |
+| `CLIENT_IMPORT`              | A route was imported from browser code                              |
 | `UNSUPPORTED_IMPORT`         | The route needs an interface the runtime doesn't provide            |
-| `MISSING_HANDLER`            | The route has no `#[wstd::http_server]` entry point                 |
+| `MISSING_HANDLER`            | The component doesn't export `wasi:http/incoming-handler`           |
 | `ROUTE_INSTANTIATION_FAILED` | The compiled route couldn't be instantiated                         |
 | `ROUTE_TRAPPED`              | The route panicked or trapped; the message includes the panic text  |
 | `ROUTE_NO_RESPONSE`          | The route returned without responding                               |
@@ -174,7 +180,7 @@ So use polyroute today when you want to write a route in Rust and deploy it wher
 
 ## Limits
 
-- Rust only, built with wstd 0.5 and `wasm32-wasip2`.
+- Rust routes build with wstd 0.5 and `wasm32-wasip2`.
 - Request and response bodies are buffered in memory. Streaming isn't supported yet.
 - A route that sleeps blocks the Node event loop while it sleeps.
 - Each route bundles its own copy of jco's glue code, about 400 KB before compression.

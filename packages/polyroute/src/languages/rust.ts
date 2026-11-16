@@ -1,33 +1,13 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PolyrouteError } from "./errors.js";
+import { PolyrouteError } from "../errors.js";
+import { createQueue, runTool, samePath } from "./process.js";
+import type { Language, RouteBuildInput, RouteBuildResult } from "./types.js";
 
 export const RUST_TARGET = "wasm32-wasip2";
 export const WSTD_VERSION = "0.5";
-
-export interface RustBuildOptions {
-  /** Absolute path of the `.rs` route. */
-  routeFile: string;
-  /** Root-relative path of the route, used in messages. */
-  label: string;
-  /** Directory for generated crates and the shared cargo target directory. */
-  cacheDir: string;
-}
-
-export interface RustBuildResult {
-  wasm: Uint8Array;
-  /** Local source files the build read, for the dev server to watch. */
-  sources: string[];
-}
-
-interface RunResult {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-}
 
 interface CargoArtifact {
   reason?: string;
@@ -38,18 +18,20 @@ interface CargoArtifact {
 
 // cargo locks the shared target directory anyway; queueing here keeps one
 // build's artifact from being read while the next build overwrites it.
-let queue: Promise<unknown> = Promise.resolve();
+const enqueue = createQueue();
 
-export function buildRustRoute(options: RustBuildOptions): Promise<RustBuildResult> {
-  const task = queue.then(
-    () => build(options),
-    () => build(options),
-  );
-  queue = task.catch(() => undefined);
-  return task;
+export const rust: Language = {
+  name: "Rust",
+  extensions: [".rs"],
+  handlerHint: "Mark the route's entry point with `#[wstd::http_server]`.",
+  build: (input) => buildRustRoute(input),
+};
+
+export function buildRustRoute(input: RouteBuildInput): Promise<RouteBuildResult> {
+  return enqueue(() => build(input));
 }
 
-async function build({ routeFile, label, cacheDir }: RustBuildOptions): Promise<RustBuildResult> {
+async function build({ routeFile, label, cacheDir }: RouteBuildInput): Promise<RouteBuildResult> {
   const routeDir = path.dirname(routeFile);
   const ownManifest = path.join(routeDir, "Cargo.toml");
   const manifestPath = existsSync(ownManifest)
@@ -57,31 +39,22 @@ async function build({ routeFile, label, cacheDir }: RustBuildOptions): Promise<
     : await writeGeneratedManifest(routeFile, label, cacheDir);
   const targetDir = path.join(cacheDir, "target");
 
-  let result: RunResult;
-  try {
-    result = await run(
-      "cargo",
-      [
-        "build",
-        "--release",
-        "--target",
-        RUST_TARGET,
-        "--manifest-path",
-        manifestPath,
-        "--message-format=json-render-diagnostics",
-      ],
-      { CARGO_TARGET_DIR: targetDir },
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new PolyrouteError(
-        "TOOLCHAIN_MISSING",
-        `Building \`${label}\` needs the Rust toolchain, but \`cargo\` isn't on PATH. Install it from https://rustup.rs, then run \`rustup target add ${RUST_TARGET}\`.`,
-        { cause: error },
-      );
-    }
-    throw error;
-  }
+  const result = await runTool(
+    "cargo",
+    [
+      "build",
+      "--release",
+      "--target",
+      RUST_TARGET,
+      "--manifest-path",
+      manifestPath,
+      "--message-format=json-render-diagnostics",
+    ],
+    {
+      env: { CARGO_TARGET_DIR: targetDir },
+      missing: `Building \`${label}\` needs the Rust toolchain, but \`cargo\` isn't on PATH. Install it from https://rustup.rs, then run \`rustup target add ${RUST_TARGET}\`.`,
+    },
+  );
 
   if (result.exitCode !== 0) {
     const output = result.stderr.trimEnd();
@@ -145,14 +118,6 @@ async function writeGeneratedManifest(
   return manifestPath;
 }
 
-function samePath(a: string, b: string): boolean {
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch {
-    return path.resolve(a) === path.resolve(b);
-  }
-}
-
 function findExecutable(stdout: string, routeFile: string): string | undefined {
   for (const line of stdout.split("\n")) {
     if (!line.startsWith("{")) continue;
@@ -183,23 +148,4 @@ async function readDepInfo(depInfoPath: string, routeDir: string): Promise<strin
     .split(/(?<!\\) /)
     .map((file) => file.replaceAll("\\ ", " ").trim())
     .filter((file) => file.length > 0 && file.startsWith(prefix));
-}
-
-function run(command: string, args: string[], env: Record<string, string>): Promise<RunResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
-  });
 }

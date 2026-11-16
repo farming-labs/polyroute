@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildRustRoute } from "../src/rust.js";
+import { buildRustRoute } from "../src/languages/rust.js";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
 import {
   buildClientEntry,
@@ -116,5 +116,30 @@ describe("build-time checks", () => {
     await expect(buildClientEntry("server-entry.ts", path.join(outDir, "client"))).rejects.toThrow(
       /is a server route but was imported from browser code/,
     );
+  });
+});
+
+describe("prebuilt components", () => {
+  it("serves a .wasm component that was built ahead of time", async () => {
+    const { wasm } = await buildRustRoute({
+      routeFile: path.join(fixturesDir, "echo/route.rs"),
+      label: "echo/route.rs",
+      cacheDir: path.join(cacheDir, "polyroute"),
+    });
+    const root = path.join(outDir, "prebuilt-root");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "route.wasm"), wasm);
+    await writeFile(
+      path.join(root, "entry.ts"),
+      'export { default as route } from "./route.wasm";\n',
+    );
+
+    const prebuilt = await buildServerEntry("entry.ts", path.join(outDir, "prebuilt"), root);
+    const { route } = (await import(pathToFileURL(prebuilt.file).href)) as {
+      route: WasiHttpRoute;
+    };
+    const response = await route.fetch(new Request("http://localhost/prebuilt"));
+    expect(response.headers.get("x-served-by")).toBe("rust");
+    expect(await response.text()).toContain("path=/prebuilt\n");
   });
 });

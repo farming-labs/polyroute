@@ -3,13 +3,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, ResolvedConfig } from "vite";
 import { PolyrouteError } from "./errors.js";
-import { buildRustRoute } from "./rust.js";
+import { LANGUAGES, findLanguage } from "./languages/index.js";
 import { transpileRoute, type TranspiledRoute } from "./transpile.js";
 
 const RUNTIME_ID = "@farming-labs/polyroute/runtime";
 const BINDINGS_ID = "virtual:polyroute/bindings/";
 const RESOLVED_BINDINGS_ID = `\0${BINDINGS_ID}`;
-const RUST_ROUTE = /\.rs(?:\?.*)?$/;
+const ROUTE_FILE = new RegExp(
+  `\\.(?:${LANGUAGES.flatMap((language) => language.extensions.map((extension) => extension.slice(1))).join("|")})(?:\\?.*)?$`,
+);
+// Vite's own asset queries, such as `route.rs?raw` or `module.wasm?init`.
+const VITE_QUERY = /[?&](?:raw|url|init|inline|no-inline|worker|sharedworker)(?:[&=]|$)/;
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
 
 function runtimeEntry(): string {
@@ -44,7 +48,10 @@ export function createRouteModule(label: string, transpiled: TranspiledRoute): s
   ].join("\n");
 }
 
-/** Builds `.rs` route files into modules that export a web-standard fetch handler. */
+/**
+ * Builds route files written in other languages into modules that export a
+ * web-standard fetch handler.
+ */
 export function polyroute(): Plugin {
   let config: ResolvedConfig;
   const bindings = new Map<string, string>();
@@ -66,7 +73,7 @@ export function polyroute(): Plugin {
     },
 
     load: {
-      filter: { id: [RUST_ROUTE, /^\0virtual:polyroute\//] },
+      filter: { id: [ROUTE_FILE, /^\0virtual:polyroute\//] },
       async handler(id) {
         if (id.startsWith(RESOLVED_BINDINGS_ID)) {
           const key = id.slice(RESOLVED_BINDINGS_ID.length).replace(/\.js$/, "");
@@ -74,13 +81,18 @@ export function polyroute(): Plugin {
           if (code === undefined) {
             throw new PolyrouteError(
               "BUILD_FAILED",
-              `polyroute has no bindings for \`${key}\`. Import the \`.rs\` route itself, not its generated bindings.`,
+              `polyroute has no bindings for \`${key}\`. Import the route file itself, not its generated bindings.`,
             );
           }
           return code;
         }
 
+        if (VITE_QUERY.test(id)) return null;
         const routeFile = id.replace(/\?.*$/, "");
+        const language = findLanguage(routeFile);
+        if (language === undefined) return null;
+        if (language.accepts !== undefined && !(await language.accepts(routeFile))) return null;
+
         const label = toPosix(path.relative(config.root, routeFile));
         if (this.environment.config.consumer === "client") {
           throw new PolyrouteError(
@@ -91,9 +103,9 @@ export function polyroute(): Plugin {
 
         const cacheDir = path.join(config.cacheDir, "polyroute");
         const started = performance.now();
-        const { wasm, sources } = await buildRustRoute({ routeFile, label, cacheDir });
+        const { wasm, sources } = await language.build({ routeFile, label, cacheDir });
         for (const source of sources) this.addWatchFile(source);
-        const transpiled = await transpileRoute(wasm, label, cacheDir);
+        const transpiled = await transpileRoute(wasm, label, cacheDir, language.handlerHint);
         bindings.set(transpiled.key, transpiled.bindings);
         config.logger.info(
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,

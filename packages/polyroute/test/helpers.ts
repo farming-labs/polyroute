@@ -16,9 +16,13 @@ export interface BuiltEntry {
   code: string;
 }
 
-export async function buildServerEntry(entry: string, outDir: string): Promise<BuiltEntry> {
+export async function buildServerEntry(
+  entry: string,
+  outDir: string,
+  root = fixturesDir,
+): Promise<BuiltEntry> {
   const result = await build({
-    root: fixturesDir,
+    root,
     configFile: false,
     logLevel: "silent",
     cacheDir,
