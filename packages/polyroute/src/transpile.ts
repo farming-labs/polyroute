@@ -11,9 +11,10 @@ import {
   isSupportedVersion,
   parseInterfaceName,
 } from "./interfaces.js";
+import { skipSyncTaskBookkeeping } from "./sync-imports.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 3;
+const CACHE_FORMAT = 4;
 
 // jco marks its output with this directive. It has no meaning to JavaScript
 // engines, and bundlers warn that they can't preserve it.
@@ -91,7 +92,8 @@ export async function transpileRoute(
   const coreModules: Record<string, string> = {};
   for (const [name, bytes] of Object.entries(result.files)) {
     if (name === "route.js") {
-      bindings = readJcoDebugOnce(decoder.decode(bytes).replace(COMPONENT_DIRECTIVE, ""));
+      const source = readJcoDebugOnce(decoder.decode(bytes).replace(COMPONENT_DIRECTIVE, ""));
+      bindings = skipSyncTaskBookkeeping(source).bindings;
     } else if (name.endsWith(".wasm")) coreModules[name] = Buffer.from(bytes).toString("base64");
   }
   if (bindings === undefined) {

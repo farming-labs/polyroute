@@ -18,7 +18,7 @@ The built server is plain JavaScript. The machine that runs it needs Node, nothi
 
 ## What it doesn't do
 
-- **It doesn't make routes faster than TypeScript.** Routes run as WebAssembly inside V8. A Rust route costs about 2× a TypeScript route per request, and Go and Python about 5–7×. See [Performance](#performance).
+- **It doesn't make light routes faster than TypeScript.** Routes run as WebAssembly inside V8, and every call between a route and its host goes through jco's JavaScript glue. A Rust route that does almost no work costs about 1.8× a TypeScript one per request, and Go and Python about 4×. Routes that do real work can come out ahead. See [Performance](#performance).
 - **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
 - **Routes can't make outbound HTTP requests yet.** The build fails if a route needs them. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [What a route can use](#what-a-route-can-use).
 
@@ -231,7 +231,7 @@ polyroute({ instances: "per-request" });
    - Go: `go tool componentize-go build`.
    - Python: `componentize-py`, against the `polyroute:route/route` world in [`wit/`](packages/polyroute/wit).
    - Prebuilt components are read as they are.
-2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. The output is cached by content hash.
+2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. polyroute rewrites the bindings so calls into its synchronous host skip jco's async task bookkeeping ([why that's safe](docs/decisions/0002-skip-sync-task-bookkeeping.md)). The output is cached by content hash.
 3. The bindings and the base64-encoded core modules are bundled into your server build, together with polyroute's runtime.
 4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. The first request to a route instantiates its component, and later requests reuse that instance. See [Instances](#instances).
 
@@ -283,15 +283,17 @@ Measured with `pnpm bench` on the example's production build, with all routes se
 
 | Route                                           | Requests/s |     p50 |    p99 | With a fresh instance per request |
 | ----------------------------------------------- | ---------: | ------: | -----: | --------------------------------: |
-| TypeScript `GET /api/hello`                     |     26,243 | 0.33 ms | 1.7 ms |                                 – |
-| Rust `GET /api/primes?limit=2` (almost no work) |     11,214 | 0.66 ms | 2.8 ms |                             1,752 |
-| Rust `GET /api/primes?limit=10000`              |      5,766 |  1.3 ms | 4.2 ms |                             1,473 |
-| Go `GET /api/slug?text=hello`                   |      3,805 |  2.0 ms | 6.9 ms |                               328 |
-| Python `POST /api/stats`                        |      4,910 |  1.5 ms | 6.3 ms |                               144 |
+| TypeScript `GET /api/hello`                     |     25,603 | 0.33 ms | 1.8 ms |                                 – |
+| Rust `GET /api/primes?limit=2` (almost no work) |     14,004 | 0.53 ms | 3.3 ms |                             2,321 |
+| Rust `GET /api/primes?limit=10000`              |      6,706 |  1.2 ms | 3.6 ms |                             2,028 |
+| Go `GET /api/slug?text=hello`                   |      5,785 |  1.3 ms | 6.1 ms |                               400 |
+| Python `POST /api/stats`                        |      6,240 |  1.2 ms | 5.9 ms |                               108 |
 
-Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 1-second warmup, median shown. The last column is the same build with `instances: "per-request"`, measured in alternating rounds in the same run. The Go row includes replacing its instance every 1,000 requests (see [Instances](#instances)). An A/A run of two identical builds differed by under 2%, but single rounds varied by up to 10%, so read the numbers as rough. The gaps between columns are not.
+Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 1-second warmup, median shown. The first columns come from rounds alternated with the build from before the bindings rewrite described below, which served 11,167, 5,383, 3,731, and 4,440 requests/s on the four non-TypeScript rows. The TypeScript route, which the rewrite doesn't touch, differed by 2.4% between the two builds, and single rounds varied by up to 25%, so read the numbers as rough. The last column is the same build with `instances: "per-request"`, measured in a second run. The Go row includes replacing its instance every 1,000 requests (see [Instances](#instances)).
 
-Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 2× for Rust and 5–7× for Go and Python here. A CPU profile of the Rust route under load puts 3.6% of the server's busy time in the route's own WebAssembly and about 45% in the bundled JavaScript around each call, mostly jco's glue. Most of the rest is Node's HTTP server.
+Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 1.8× for Rust and 4× for Go and Python here. Every call between the route and its host goes through jco's glue. jco runs each call through its async task runtime, even when both sides are synchronous, so polyroute rewrites the bindings to skip that for its synchronous host ([0002](docs/decisions/0002-skip-sync-task-bookkeeping.md)). That halved the Rust route's cost measured in-process, from 45 µs to 24 µs a request. A CPU profile of the rewritten route still puts 41% of its time in jco's bindings and 7% in the route's own WebAssembly. Most of the rest is undici's `Request` and `Response`, polyroute's host, and V8 itself. Over HTTP, Node's server adds the same cost to every route, TypeScript included.
+
+On real work, the gap goes the other way. Counting primes below 100,000, the Rust route served 439 requests/s, the same algorithm in a plain Node server 245, and `wasmtime serve`, which runs the same component across several threads, 1,506. Those are single 5-second runs with 10 connections.
 
 So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, where cold starts and multicore throughput are strong, is a planned addition.
 
