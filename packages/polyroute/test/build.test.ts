@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
 import { buildRustRoute } from "../src/languages/rust.js";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
@@ -47,6 +47,16 @@ describe("production build", () => {
   it("bundles the runtime and bindings so the output imports nothing but node: builtins", () => {
     expect(built.code).not.toMatch(/^\s*import\s[^;]*?from\s*["'](?!node:)/m);
     expect(built.code).not.toMatch(/\bimport\(\s*["'](?!node:)/);
+  });
+
+  it("reads JCO_DEBUG once per route instead of on every call into the guest", () => {
+    const reads = built.code.split("\n").filter((line) => line.includes("JCO_DEBUG"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      expect(read).toMatch(
+        /^(?:const|var) __polyrouteJcoDebug\S* = Boolean\(globalThis\?\.process\?\.env\?\.JCO_DEBUG\);$/,
+      );
+    }
   });
 
   it("serves a GET with the path, query, and request headers", async () => {
@@ -178,6 +188,29 @@ describe('instances: "per-request"', () => {
       perRequest.counter.fetch(new Request("http://localhost/panic")),
     ).rejects.toMatchObject({ code: "ROUTE_TRAPPED" });
     expect(await count(perRequest.counter)).toBe(1);
+  });
+});
+
+describe("JCO_DEBUG", () => {
+  it("turns on jco's debug logs for routes loaded while it's set", async () => {
+    const entry = await buildServerEntry("instances-entry.ts", path.join(outDir, "jco-debug"));
+    process.env.JCO_DEBUG = "1";
+    let debugging: { counter: WasiHttpRoute };
+    try {
+      debugging = (await import(pathToFileURL(entry.file).href)) as typeof debugging;
+    } finally {
+      delete process.env.JCO_DEBUG;
+    }
+
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    try {
+      await count(routes.counter);
+      expect(debug).not.toHaveBeenCalled();
+      expect(await count(debugging.counter)).toBe(1);
+      expect(debug).toHaveBeenCalled();
+    } finally {
+      debug.mockRestore();
+    }
   });
 });
 

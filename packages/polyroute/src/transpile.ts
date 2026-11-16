@@ -13,11 +13,23 @@ import {
 } from "./interfaces.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 2;
+const CACHE_FORMAT = 3;
 
 // jco marks its output with this directive. It has no meaning to JavaScript
 // engines, and bundlers warn that they can't preserve it.
 const COMPONENT_DIRECTIVE = /^\s*["']use components["'];?[ \t]*\r?\n?/;
+
+// jco's runtime checks this before each of the debug logs it makes on every
+// call between the host and the guest. Reading `process.env` is a native call
+// in Node, so the bindings read it once, when the route's module loads.
+const JCO_DEBUG_READ = "globalThis?.process?.env?.JCO_DEBUG";
+const JCO_DEBUG_FLAG = "__polyrouteJcoDebug";
+
+function readJcoDebugOnce(bindings: string): string {
+  if (!bindings.includes(JCO_DEBUG_READ)) return bindings;
+  const body = bindings.replaceAll(JCO_DEBUG_READ, JCO_DEBUG_FLAG);
+  return `const ${JCO_DEBUG_FLAG} = Boolean(${JCO_DEBUG_READ});\n${body}`;
+}
 
 export interface TranspiledRoute {
   /** Content hash of the component and the transpiler, used as the cache key. */
@@ -78,8 +90,9 @@ export async function transpileRoute(
   let bindings: string | undefined;
   const coreModules: Record<string, string> = {};
   for (const [name, bytes] of Object.entries(result.files)) {
-    if (name === "route.js") bindings = decoder.decode(bytes).replace(COMPONENT_DIRECTIVE, "");
-    else if (name.endsWith(".wasm")) coreModules[name] = Buffer.from(bytes).toString("base64");
+    if (name === "route.js") {
+      bindings = readJcoDebugOnce(decoder.decode(bytes).replace(COMPONENT_DIRECTIVE, ""));
+    } else if (name.endsWith(".wasm")) coreModules[name] = Buffer.from(bytes).toString("base64");
   }
   if (bindings === undefined) {
     throw new PolyrouteError("BUILD_FAILED", `jco produced no bindings for \`${label}\`.`);
