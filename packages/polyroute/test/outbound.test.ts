@@ -17,6 +17,7 @@ interface OutboundEntry {
 }
 
 let outDir: string;
+let code: string;
 let routes: OutboundEntry;
 let upstream: http.Server;
 let base: string;
@@ -58,12 +59,25 @@ beforeAll(async () => {
       outbound: { allow: ["127.0.0.1"] },
     },
   );
+  code = built.code;
   routes = (await import(pathToFileURL(built.file).href)) as OutboundEntry;
 });
 
 afterAll(async () => {
   upstream?.close();
   await rm(outDir, { recursive: true, force: true });
+});
+
+describe("production build of routes that send requests", () => {
+  it("calls every host import that can't suspend without jco's async task bookkeeping", () => {
+    const trampolines = code.match(/\b_trampoline\d+\.fnName = "/g) ?? [];
+    const suspending = code.match(/\b_trampoline\d+\.manuallyAsync = !0;/g) ?? [];
+    const direct =
+      code.match(/\$checkMayLeave(?:\$\d+)?\(_jcoTaskCompatImportContext\.mayLeave, \d+\);/g) ?? [];
+    // `poll` and `pollable.block`, in the Rust and the Go route.
+    expect(suspending.length).toBe(4);
+    expect(direct.length).toBe(trampolines.length - suspending.length);
+  });
 });
 
 describe.runIf(jspi).each(["rust", "go"] as const)("%s route that sends requests", (language) => {

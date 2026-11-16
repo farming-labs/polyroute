@@ -15,7 +15,7 @@ import {
 import { skipSyncTaskBookkeeping } from "./sync-imports.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 6;
+const CACHE_FORMAT = 7;
 
 // A route that sends outbound requests waits for responses in these imports.
 // JSPI lets them return a promise: V8 suspends the guest's stack, and resumes

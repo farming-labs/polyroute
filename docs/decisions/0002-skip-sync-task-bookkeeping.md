@@ -52,3 +52,23 @@ Keeping the may-leave check and the trap checks costs 1 to 6 µs a request compa
 - polyroute depends on the shape of jco's output. Upgrading jco needs the guard test to pass.
 - A host function that is async, or that calls back into the guest, would need jco's task machinery. polyroute's host has neither today. Adding one, for example outbound HTTP, means revisiting this decision.
 - If jco adds a fast path for imports that are synchronous on both sides, delete this rewrite.
+
+## Update, 2026-11-16: routes that send requests
+
+Outbound HTTP added host imports that suspend ([0003](0003-outbound-http-with-jspi.md)). A route that imports `wasi:http/outgoing-handler` is transpiled with JSPI, and jco marks `wasi:io/poll#poll` and `wasi:io/poll#[method]pollable.block` with `manuallyAsync` and lowers them through its suspending wrapper. The rewrite used to leave a whole route alone when any import was marked that way. It now skips only the marked imports and rewrites the rest. The reasoning above still holds for the rest:
+
+- They're still synchronous and never call the guest.
+- The current-task register is still never changed by them. jco's suspending wrapper reads the register when it's called, to decide whether the guest may block, and restores it when the suspended call resumes. So a suspending import sees the guest's export task, with or without the rewrite, and so does `cabi_realloc` after the guest resumes.
+
+The test suite checks the production bundle of a Rust and a Go route that send requests, and fails unless every import other than the four suspending ones was rewritten.
+
+Measured with the rewrite skipping only the suspending imports, against leaving the route alone (Apple M1 under load from other work, so rough):
+
+| Route                                      | Left alone |   Rewritten |
+| ------------------------------------------ | ---------: | ----------: |
+| Rust, answers without sending, in-process  |     116 µs |       52 µs |
+| Rust, forwards one request, in-process CPU |   1,058 µs |      784 µs |
+| Go, forwards one request, in-process CPU   |   2,307 µs |    1,112 µs |
+| The example's relay route over HTTP        |  536 req/s | 1,308 req/s |
+
+In-process numbers are medians of 25 or 30 interleaved rounds. The HTTP numbers are medians of 9 rounds alternating between the two builds.
