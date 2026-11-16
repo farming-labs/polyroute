@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, type Rolldown } from "vite";
-import { polyroute } from "../src/index.js";
+import { polyroute, type PolyrouteOptions } from "../src/index.js";
 
 export const fixturesDir = fileURLToPath(new URL("./fixtures/", import.meta.url));
 
@@ -20,13 +20,14 @@ export async function buildServerEntry(
   entry: string,
   outDir: string,
   root = fixturesDir,
+  options: PolyrouteOptions = {},
 ): Promise<BuiltEntry> {
   const result = await build({
     root,
     configFile: false,
     logLevel: "silent",
     cacheDir,
-    plugins: [polyroute()],
+    plugins: [polyroute(options)],
     build: { ssr: entry, outDir, emptyOutDir: true, minify: false },
   });
   const outputs = (Array.isArray(result) ? result : [result]) as Rolldown.RolldownOutput[];

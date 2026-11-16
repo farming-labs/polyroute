@@ -5,3 +5,4 @@ export { default as python } from "./python/echo/route.py";
 export { default as pythonRaise } from "./python/raise/route.py";
 export { default as go } from "./go/echo/route.go";
 export { default as goPanic } from "./go/panic/route.go";
+export { default as counter } from "./counter/route.rs";
