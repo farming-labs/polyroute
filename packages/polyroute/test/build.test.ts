@@ -6,7 +6,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
 import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
 import { buildRustRoute } from "../src/languages/rust.js";
+import { IncomingRequest } from "../src/runtime/host.js";
 import { createWasiHttpHandler, type WasiHttpRoute } from "../src/runtime/index.js";
+import { transpileRoute } from "../src/transpile.js";
 import {
   buildClientEntry,
   buildServerEntry,
@@ -59,6 +61,19 @@ describe("production build", () => {
         /^(?:const|var) __polyrouteJcoDebug\S* = Boolean\(globalThis\?\.process\?\.env\?\.JCO_DEBUG\);$/,
       );
     }
+  });
+
+  it("calls every synchronous host import without jco's async task bookkeeping", () => {
+    // The server entry has Rust, Python, and Go routes. Each import's trampoline
+    // starts with the may-leave check jco used to run in the lowering wrapper.
+    const trampolines = built.code.match(/\b_trampoline\d+\.fnName = "/g) ?? [];
+    const direct =
+      built.code.match(
+        /\$checkMayLeave(?:\$\d+)?\(_jcoTaskCompatImportContext\.mayLeave, \d+\);/g,
+      ) ?? [];
+    expect(trampolines.length).toBeGreaterThan(0);
+    expect(direct.length).toBe(trampolines.length);
+    expect(built.code).not.toMatch(/_lowerImportBackwardsCompat(?:\$\d+)?\.bind\(/);
   });
 
   it("serves a GET with the path, query, and request headers", async () => {
@@ -172,6 +187,49 @@ describe("reused instances (the default)", () => {
     ]);
     expect(trapped).toMatchObject({ status: "rejected", reason: { code: "ROUTE_TRAPPED" } });
     expect(rest).toEqual([1, 2, 3, 4, 5].map((value) => ({ status: "fulfilled", value })));
+  });
+});
+
+describe("host calls", () => {
+  async function loadRoute(fixture: string): Promise<WasiHttpRoute> {
+    const label = `${fixture}/route.rs`;
+    const routeCache = path.join(cacheDir, "polyroute");
+    const routeFile = path.join(fixturesDir, label);
+    const { wasm } = await buildRustRoute({ routeFile, label, cacheDir: routeCache });
+    const transpiled = await transpileRoute(wasm, label, routeCache, "");
+    const file = path.join(outDir, `bindings-${transpiled.key}.mjs`);
+    await writeFile(file, transpiled.bindings);
+    const { instantiate } = (await import(pathToFileURL(file).href)) as {
+      instantiate: Parameters<typeof createWasiHttpHandler>[0]["instantiate"];
+    };
+    return createWasiHttpHandler({
+      route: label,
+      instantiate,
+      coreModules: transpiled.coreModules,
+    });
+  }
+
+  it("traps the instance when a host call throws, and the next request gets a new one", async () => {
+    const route = await loadRoute("counter");
+    expect(await count(route)).toBe(1);
+    expect(await count(route)).toBe(2);
+
+    const method = Object.getOwnPropertyDescriptor(IncomingRequest.prototype, "method")!;
+    Object.defineProperty(IncomingRequest.prototype, "method", {
+      ...method,
+      value() {
+        throw new Error("host call failed on purpose");
+      },
+    });
+    try {
+      await expect(route.fetch(new Request("http://localhost/"))).rejects.toMatchObject({
+        code: "ROUTE_TRAPPED",
+        message: expect.stringContaining("host call failed on purpose"),
+      });
+    } finally {
+      Object.defineProperty(IncomingRequest.prototype, "method", method);
+    }
+    expect(await count(route)).toBe(1);
   });
 });
 
