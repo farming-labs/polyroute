@@ -7,6 +7,7 @@ import { transpileBytes } from "@bytecodealliance/jco-transpile";
 import { PolyrouteError } from "./errors.js";
 import {
   HTTP_HANDLER_INTERFACE,
+  OUTGOING_HANDLER_INTERFACE,
   SUPPORTED_INTERFACES,
   isSupportedVersion,
   parseInterfaceName,
@@ -14,7 +15,13 @@ import {
 import { skipSyncTaskBookkeeping } from "./sync-imports.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 5;
+const CACHE_FORMAT = 6;
+
+// A route that sends outbound requests waits for responses in these imports.
+// JSPI lets them return a promise: V8 suspends the guest's stack, and resumes
+// it once the promise settles, while the event loop keeps running.
+const SUSPENDING_IMPORTS = ["wasi:io/poll#poll", "wasi:io/poll#[method]pollable.block"];
+const SUSPENDING_EXPORTS = [`${HTTP_HANDLER_INTERFACE}#handle`];
 
 // jco marks its output with this directive. It has no meaning to JavaScript
 // engines, and bundlers warn that they can't preserve it.
@@ -58,6 +65,11 @@ export interface TranspiledRoute {
   bindings: string;
   /** Core Wasm modules, base64-encoded, keyed by the name `instantiate` asks for. */
   coreModules: Record<string, string>;
+  /**
+   * Whether the route imports `wasi:http/outgoing-handler`. Such a route is
+   * transpiled with JSPI, and its `handle` export returns a promise.
+   */
+  outbound: boolean;
 }
 
 const supported: ReadonlySet<string> = new Set(SUPPORTED_INTERFACES);
@@ -89,12 +101,27 @@ export async function transpileRoute(
   if (cached !== undefined) return { key, ...(JSON.parse(cached) as Omit<TranspiledRoute, "key">) };
 
   let result: Awaited<ReturnType<typeof transpileBytes>>;
+  let outbound = false;
   try {
-    result = await transpileBytes(wasm, {
+    const options = {
       name: "route",
       instantiation: "async",
       emitTypescriptDeclarations: false,
-    });
+    } as const;
+    result = await transpileBytes(wasm, options);
+    // jco reports a component's imports only after transpiling it, so a route
+    // that sends requests is transpiled a second time, with JSPI.
+    outbound = result.imports.some(
+      (name) => parseInterfaceName(name).name === OUTGOING_HANDLER_INTERFACE,
+    );
+    if (outbound) {
+      result = await transpileBytes(wasm, {
+        ...options,
+        asyncMode: "jspi",
+        asyncImports: SUSPENDING_IMPORTS,
+        asyncExports: SUSPENDING_EXPORTS,
+      });
+    }
   } catch (error) {
     throw new PolyrouteError(
       "BUILD_FAILED",
@@ -119,7 +146,7 @@ export async function transpileRoute(
     throw new PolyrouteError("BUILD_FAILED", `jco produced no bindings for \`${label}\`.`);
   }
 
-  const entry = { bindings, coreModules };
+  const entry = { bindings, coreModules, outbound };
   await mkdir(path.dirname(cacheFile), { recursive: true });
   // Write then rename so a concurrent reader never sees a partial file.
   const temporary = `${cacheFile}.${process.pid}.tmp`;
@@ -148,6 +175,6 @@ function checkImports(imports: string[], label: string): void {
   const list = missing.map((name) => `\`${name}\``).join(", ");
   throw new PolyrouteError(
     "UNSUPPORTED_IMPORT",
-    `\`${label}\` imports ${list}, which polyroute's embedded runtime doesn't provide. Routes can use stdout and stderr, clocks, random numbers, and \`wasi:http/types\`, and the filesystem and sockets are linked with nothing behind them. Outbound HTTP isn't available yet, so remove the code that needs it.`,
+    `\`${label}\` imports ${list}, which polyroute's embedded runtime doesn't provide. Routes can use stdout and stderr, clocks, random numbers, \`wasi:http/types\`, and \`wasi:http/outgoing-handler\`, and the filesystem and sockets are linked with nothing behind them. Remove the code that needs the rest.`,
   );
 }

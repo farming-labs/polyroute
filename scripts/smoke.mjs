@@ -128,6 +128,20 @@ const checks = [
     status: 200,
     body: '{"slug":"hello-world-farm","text":"Hello World, Farm!"}\n',
   },
+  // The relay route sends a request, which needs JSPI (Node 24 and later).
+  // Without it, the route fails with UNSUPPORTED_RUNTIME and the server answers 500.
+  typeof WebAssembly.Suspending === "function"
+    ? {
+        name: "Rust route calls another route over HTTP",
+        path: "/api/relay",
+        status: 200,
+        body: '{"relayed":{"message":"Hello from TypeScript"}}',
+      }
+    : {
+        name: "Rust route that sends requests fails without JSPI",
+        path: "/api/relay",
+        status: 500,
+      },
   { name: "unknown path", path: "/api/missing", status: 404 },
 ];
 

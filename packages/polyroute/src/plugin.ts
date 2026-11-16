@@ -5,6 +5,7 @@ import type { Plugin, ResolvedConfig } from "vite";
 import { PolyrouteError } from "./errors.js";
 import { LANGUAGES, findLanguage } from "./languages/index.js";
 import { INSTANCE_MODES, type InstanceMode } from "./runtime/index.js";
+import { createOutboundPolicy, type OutboundOptions } from "./runtime/outbound.js";
 import { transpileRoute, type TranspiledRoute } from "./transpile.js";
 
 export interface PolyrouteOptions {
@@ -18,10 +19,20 @@ export interface PolyrouteOptions {
    *   request, at a large cost per request.
    */
   instances?: InstanceMode;
+  /**
+   * Lets routes send HTTP requests with their language's own client, such as
+   * wstd's `Client` in Rust or `net/http` with `wasihttp` in Go, to the hosts
+   * in `allow`. Without it, a route that sends requests fails to build.
+   *
+   * @example
+   * polyroute({ outbound: { allow: ["api.github.com", "*.example.com"] } })
+   */
+  outbound?: OutboundOptions;
 }
 
 interface ResolvedPolyrouteOptions {
   instances: InstanceMode;
+  outbound: OutboundOptions | undefined;
 }
 
 function resolveOptions(options: PolyrouteOptions): ResolvedPolyrouteOptions {
@@ -32,7 +43,11 @@ function resolveOptions(options: PolyrouteOptions): ResolvedPolyrouteOptions {
       `\`instances\` must be ${INSTANCE_MODES.map((mode) => `"${mode}"`).join(" or ")}, but it's ${JSON.stringify(instances)}.`,
     );
   }
-  return { instances };
+  const outbound =
+    options.outbound === undefined
+      ? undefined
+      : { allow: createOutboundPolicy(options.outbound).allow };
+  return { instances, outbound };
 }
 
 const RUNTIME_ID = "@farming-labs/polyroute/runtime";
@@ -59,6 +74,7 @@ export function createRouteModule(
   transpiled: TranspiledRoute,
   instances: InstanceMode,
   requestsPerInstance?: number,
+  outbound?: OutboundOptions,
 ): string {
   const coreModules = Object.entries(transpiled.coreModules)
     .map(([name, encoded]) => `    ${JSON.stringify(name)}: ${JSON.stringify(encoded)},`)
@@ -73,6 +89,7 @@ export function createRouteModule(
     ...(requestsPerInstance === undefined
       ? []
       : [`  requestsPerInstance: ${JSON.stringify(requestsPerInstance)},`]),
+    ...(outbound === undefined ? [] : [`  outbound: ${JSON.stringify(outbound)},`]),
     "  instantiate,",
     "  coreModules: {",
     coreModules,
@@ -91,7 +108,7 @@ export function createRouteModule(
  * web-standard fetch handler.
  */
 export function polyroute(options: PolyrouteOptions = {}): Plugin {
-  const { instances } = resolveOptions(options);
+  const { instances, outbound } = resolveOptions(options);
   let config: ResolvedConfig;
   const bindings = new Map<string, string>();
 
@@ -145,12 +162,24 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
         const { wasm, sources } = await language.build({ routeFile, label, cacheDir });
         for (const source of sources) this.addWatchFile(source);
         const transpiled = await transpileRoute(wasm, label, cacheDir, language.handlerHint);
+        if (transpiled.outbound && outbound === undefined) {
+          throw new PolyrouteError(
+            "OUTBOUND_NOT_ALLOWED",
+            `\`${label}\` sends HTTP requests (it imports \`wasi:http/outgoing-handler\`), and polyroute allows none by default. List the hosts routes may call, for example \`polyroute({ outbound: { allow: ["api.example.com"] } })\`.`,
+          );
+        }
         bindings.set(transpiled.key, transpiled.bindings);
         config.logger.info(
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,
           { timestamp: true },
         );
-        return createRouteModule(label, transpiled, instances, language.requestsPerInstance);
+        return createRouteModule(
+          label,
+          transpiled,
+          instances,
+          language.requestsPerInstance,
+          transpiled.outbound ? outbound : undefined,
+        );
       },
     },
   };

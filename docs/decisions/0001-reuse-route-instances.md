@@ -44,3 +44,7 @@ The runtime now also checks, right before calling `handle`, that the instance it
 ## Update, 2026-11-16: jco's handle tables no longer grow with every request
 
 jco adds the rep of every resource it hands the guest to a Set on that resource's handle table, and nothing reads or empties the Set. With a fresh instance per request, that didn't matter. A reused instance's Sets grow by 9 to 11 entries a request. On the example's Rust route the heap grew by about 90 MB over 400,000 requests, and the busiest Set would reach V8's limit of 2^24 entries after about 8.4 million, past which `Set.add` throws. The transpiled bindings now skip the `add` when the Sets have no other use. The heap then stays flat, and each request is about 15% cheaper in-process.
+
+## Update, 2026-11-16: routes that send requests get a pool
+
+A route that sends outbound HTTP requests is transpiled with JSPI, and its `handle` can suspend while it waits for a response ([0003](0003-outbound-http-with-jspi.md)). Requests to it can then overlap, so "nothing awaits between taking the instance and returning from `handle`" no longer holds for it. The runtime now keeps a pool of reused instances per route. A request takes an idle instance or starts a new one, up to 32 for a route that suspends, and releases it when it's done. Each instance still serves one request at a time. A route that never suspends is limited to one instance and behaves as described above.

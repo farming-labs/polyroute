@@ -9,18 +9,22 @@ import {
   type ErrorCode,
   type HostImports,
   type LineSink,
+  type OutboundContext,
   type OutgoingResponse,
   type ResponseResult,
   type StreamSink,
 } from "./host.js";
+import { createOutboundPolicy, type OutboundOptions, type OutboundPolicy } from "./outbound.js";
 
 export { PolyrouteError, type PolyrouteErrorCode } from "../errors.js";
+export type { OutboundOptions } from "./outbound.js";
 
 export type FetchHandler = (request: Request) => Promise<Response>;
 
 export interface RouteInstance {
   incomingHandler: {
-    handle(request: IncomingRequest, responseOut: ResponseOutparam): void;
+    /** Returns a promise in a route transpiled with JSPI. */
+    handle(request: IncomingRequest, responseOut: ResponseOutparam): Promise<void> | undefined;
   };
   _util?: { stop(): void };
 }
@@ -57,6 +61,12 @@ export interface WasiHttpHandlerOptions {
    * guests whose memory grows with every request. Defaults to no limit.
    */
   requestsPerInstance?: number;
+  /**
+   * Hosts the route may send HTTP requests to. Set only for a route that
+   * imports `wasi:http/outgoing-handler` and was transpiled with JSPI, whose
+   * `handle` can wait for a response without blocking the event loop.
+   */
+  outbound?: OutboundOptions;
 }
 
 export interface WasiHttpRoute {
@@ -66,6 +76,13 @@ export interface WasiHttpRoute {
 
 const STDERR_TAIL_LINES = 20;
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/**
+ * A route that waits for outbound responses serves concurrent requests with
+ * one reused instance each, up to this many. Further requests wait for one.
+ * A route that never waits only ever needs one.
+ */
+export const MAX_INSTANCES_PER_ROUTE = 32;
 
 function decodeBase64(encoded: string): Uint8Array<ArrayBuffer> {
   const native = (
@@ -107,8 +124,13 @@ interface Slot {
   instance: RouteInstance;
   stdout: Relay;
   stderr: Relay;
+  outbound: OutboundContext | undefined;
   served: number;
   retired: boolean;
+}
+
+function hasJspi(): boolean {
+  return typeof (WebAssembly as { Suspending?: unknown }).Suspending === "function";
 }
 
 /**
@@ -127,6 +149,9 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
     );
   }
   const reuse = (options.instances ?? "reuse") === "reuse";
+  const policy: OutboundPolicy | undefined =
+    options.outbound === undefined ? undefined : createOutboundPolicy(options.outbound);
+  const maxInstances = policy === undefined ? 1 : MAX_INSTANCES_PER_ROUTE;
   const compiled = new Map<string, Promise<WebAssembly.Module>>();
   // Output written outside a request, such as while a reused instance starts.
   const idle = {
@@ -153,10 +178,20 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
   };
 
   const instantiateSlot = async (stdout: LineSink, stderr: LineSink): Promise<Slot> => {
+    if (policy !== undefined && !hasJspi()) {
+      throw new PolyrouteError(
+        "UNSUPPORTED_RUNTIME",
+        `Route \`${route}\` sends HTTP requests, which needs WebAssembly JavaScript Promise Integration (\`WebAssembly.Suspending\`). This JavaScript runtime doesn't have it. Run the server on Node 24 or later.`,
+      );
+    }
     const relays = { stdout: createRelay(stdout), stderr: createRelay(stderr) };
+    const outbound = policy === undefined ? undefined : { policy, signal: undefined };
     try {
-      const instance = await options.instantiate(getCoreModule, createImports(relays));
-      return { instance, ...relays, served: 0, retired: false };
+      const instance = await options.instantiate(
+        getCoreModule,
+        createImports({ ...relays, outbound }),
+      );
+      return { instance, ...relays, outbound, served: 0, retired: false };
     } catch (error) {
       if (error instanceof PolyrouteError) throw error;
       throw new PolyrouteError(
@@ -167,41 +202,43 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
     }
   };
 
-  let shared: Promise<Slot> | undefined;
-  let sharedSlot: Slot | undefined;
+  // Reused instances that aren't serving a request, most recently used last.
+  const idleSlots: Slot[] = [];
+  // Reused instances that are starting, idle, or serving a request.
+  let liveSlots = 0;
+  const waiting: Array<() => void> = [];
 
-  const acquireShared = async (): Promise<Slot> => {
-    while (true) {
-      if (shared === undefined) {
-        const pending = instantiateSlot(idle.stdout, idle.stderr);
-        shared = pending;
-        pending.then(
-          (slot) => {
-            if (shared === pending) sharedSlot = slot;
-            idle.stdout.end();
-            idle.stderr.end();
-          },
+  const acquire = async (): Promise<Slot> => {
+    for (;;) {
+      const slot = idleSlots.pop();
+      if (slot !== undefined) return slot;
+      if (liveSlots < maxInstances) {
+        liveSlots++;
+        try {
+          const started = await instantiateSlot(idle.stdout, idle.stderr);
+          idle.stdout.end();
+          idle.stderr.end();
+          return started;
+        } catch (error) {
           // A failed start isn't kept, so the next request tries again.
-          () => {
-            if (shared === pending) shared = undefined;
-          },
-        );
+          liveSlots--;
+          waiting.shift()?.();
+          throw error;
+        }
       }
-      const current = shared;
-      const slot = await current;
-      // Another request may have retired this instance while this one waited.
-      if (!slot.retired) return slot;
-      if (shared === current) shared = undefined;
+      await new Promise<void>((resolve) => waiting.push(resolve));
     }
   };
 
   const retire = (slot: Slot): void => {
     slot.retired = true;
-    if (slot === sharedSlot) {
-      shared = undefined;
-      sharedSlot = undefined;
-    }
     slot.instance._util?.stop();
+  };
+
+  const release = (slot: Slot): void => {
+    if (slot.retired) liveSlots--;
+    else idleSlots.push(slot);
+    waiting.shift()?.();
   };
 
   const fetch: FetchHandler = async (request) => {
@@ -217,14 +254,14 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
     });
 
-    let slot = reuse ? await acquireShared() : await instantiateSlot(stdout, stderr);
-    // Requests that were queued on the same instance resume first, and one of
-    // them may have retired it. From this check to the end of `handle` nothing
-    // awaits, so no other request can reach the instance until this one is done.
-    while (slot.retired) slot = await acquireShared();
+    // An acquired instance serves only this request until it's released.
+    const slot = reuse ? await acquire() : await instantiateSlot(stdout, stderr);
     const { instance } = slot;
     slot.stdout.target = stdout;
     slot.stderr.target = stderr;
+    // Requests the route sends are cancelled once it has answered this one.
+    const controller = slot.outbound === undefined ? undefined : new AbortController();
+    if (slot.outbound !== undefined) slot.outbound.signal = controller!.signal;
 
     let result: ResponseResult | undefined;
     const incoming = new IncomingRequest({
@@ -238,7 +275,8 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
     });
 
     try {
-      instance.incomingHandler.handle(incoming, outparam);
+      const pending = instance.incomingHandler.handle(incoming, outparam);
+      if (pending !== undefined) await pending;
     } catch (error) {
       // A trapped instance can't be trusted or even called again.
       retire(slot);
@@ -255,12 +293,15 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
         { cause: error },
       );
     } finally {
+      controller?.abort();
+      if (slot.outbound !== undefined) slot.outbound.signal = undefined;
       stdout.end();
       stderr.end();
       slot.stdout.target = idle.stdout;
       slot.stderr.target = idle.stderr;
       slot.served++;
       if (!slot.retired && (!reuse || slot.served >= requestsPerInstance)) retire(slot);
+      if (reuse) release(slot);
     }
 
     if (result === undefined) {
