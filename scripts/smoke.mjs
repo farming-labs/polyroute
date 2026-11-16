@@ -4,6 +4,7 @@
 // of the workspace and installed from a packed tarball, the way users get it.
 
 import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -149,7 +150,13 @@ try {
     );
   }
 } finally {
-  child.kill();
+  // Windows keeps a running process's working directory locked, so the packed
+  // app's folder can only be removed after the server has actually exited.
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = once(child, "exit");
+    child.kill();
+    await exited;
+  }
   await cleanup();
 }
 
