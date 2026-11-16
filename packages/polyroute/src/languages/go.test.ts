@@ -3,10 +3,29 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { go } from "./go.js";
+import { componentizeGoHint, go } from "./go.js";
 import type { RouteBuildResult } from "./types.js";
 
 const routeFile = fileURLToPath(new URL("../../test/fixtures/go/echo/route.go", import.meta.url));
+
+describe("componentizeGoHint", () => {
+  it("points Windows users at the manual install when the wrapper's download 404s", () => {
+    // The wrapper's output on a GitHub Actions Windows runner.
+    const diagnostics =
+      "2026/11/16 06:48:55 unexpected status for URL `https://github.com/bytecodealliance/componentize-go/releases/download/v0.5.3/componentize-go-windows-amd64.tar.gz`: 404";
+    expect(componentizeGoHint(diagnostics)).toContain('"Go on Windows" in polyroute\'s README');
+  });
+
+  it("names the setup commands when componentize-go isn't a tool of the module", () => {
+    expect(componentizeGoHint('go: no such tool "componentize-go"')).toContain(
+      "go get -tool github.com/bytecodealliance/componentize-go@v0.5.3",
+    );
+  });
+
+  it("adds nothing for a compile error, whose own output already explains it", () => {
+    expect(componentizeGoHint("./route.go:12:2: undefined: wasihttp.Handle")).toBe("");
+  });
+});
 
 describe("go", () => {
   let workDir: string;

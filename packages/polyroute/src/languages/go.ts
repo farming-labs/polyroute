@@ -69,16 +69,25 @@ async function buildGoRoute({
   });
   if (result.exitCode !== 0) {
     const diagnostics = `${result.stdout}${result.stderr}`.trimEnd();
-    const hint = diagnostics.includes('no such tool "componentize-go"')
-      ? `\n\nAdd componentize-go to the module: ${SETUP}.`
-      : "";
     throw new PolyrouteError(
       "BUILD_FAILED",
-      `componentize-go couldn't build \`${label}\`:\n\n${diagnostics}${hint}`,
+      `componentize-go couldn't build \`${label}\`:\n\n${diagnostics}${componentizeGoHint(diagnostics)}`,
     );
   }
 
   return { wasm: await readFile(output), sources: await listGoSources(routeDir) };
+}
+
+/** The next step for componentize-go failures whose own output doesn't say how to fix them. */
+export function componentizeGoHint(diagnostics: string): string {
+  if (diagnostics.includes('no such tool "componentize-go"')) {
+    return `\n\nAdd componentize-go to the module: ${SETUP}.`;
+  }
+  // The wrapper asks for a Windows `.tar.gz`, but releases only ship a `.zip`.
+  if (diagnostics.includes("componentize-go-windows-amd64.tar.gz")) {
+    return `\n\ncomponentize-go ${COMPONENTIZE_GO_VERSION} can't download its own Windows binary. Put it in place by hand as described in "Go on Windows" in polyroute's README, then build again.`;
+  }
+  return "";
 }
 
 function findModuleRoot(dir: string): string | undefined {
