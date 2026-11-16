@@ -125,7 +125,7 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
     try {
       instance.incomingHandler.handle(incoming, outparam);
     } catch (error) {
-      stderr.flush();
+      stderr.end();
       const detail =
         stderrTail.length > 0
           ? stderrTail.join("\n")
@@ -138,8 +138,8 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
         { cause: error },
       );
     } finally {
-      stdout.flush();
-      stderr.flush();
+      stdout.end();
+      stderr.end();
       instance._util?.stop();
     }
 
