@@ -141,6 +141,24 @@ go get -tool github.com/bytecodealliance/componentize-go@v0.5.3
 
 The route needs its own `go.mod` because componentize-go only finds its WIT when it runs from the module root. It also only looks in modules that are already downloaded, so polyroute runs `go mod download` in the route's module before each build. The first build needs access to the Go module proxy, or a module cache that already has the route's dependencies. Every `.go` file in the route's directory is part of the route, and editing any of them, or `go.mod`, rebuilds it in dev.
 
+#### Go on Windows
+
+componentize-go's Go wrapper downloads its binary the first time it runs. On Windows that download fails with a 404: the wrapper asks for `componentize-go-windows-amd64.tar.gz`, but releases only ship a `.zip`. Until that's fixed upstream, put the binary in the wrapper's cache yourself, once per machine, in PowerShell:
+
+```powershell
+$version = "v0.5.3"
+$sha256 = "253aec144b983c8d3c5d7fbfacc2e429e6beaa23b75f22cd0c8bb35ade66d06a"
+$cache = Join-Path $env:LOCALAPPDATA "bytecodealliance\componentize-go"
+$zip = Join-Path $env:TEMP "componentize-go-$version-windows-amd64.zip"
+Invoke-WebRequest "https://github.com/bytecodealliance/componentize-go/releases/download/$version/componentize-go-windows-amd64.zip" -OutFile $zip
+if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $sha256) { throw "$zip doesn't match the release checksum." }
+Expand-Archive $zip -DestinationPath "$cache\bin" -Force
+Copy-Item "$cache\bin\componentize-go.exe" "$cache\bin\componentize-go" -Force
+Set-Content "$cache\version.txt" $version -NoNewline
+```
+
+The wrapper skips the download when `bin\componentize-go` exists and `version.txt` names its release, and it then runs `componentize-go.exe`. The checksum is the one in the release's `checksums.txt`. CI runs the same steps on its Windows runners.
+
 ### Python
 
 A Python route defines a function per HTTP method. Each takes a `Request` and returns a `Response`:

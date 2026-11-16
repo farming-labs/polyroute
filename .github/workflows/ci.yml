@@ -36,6 +36,21 @@ jobs:
         with:
           go-version: "1.27.x"
           cache-dependency-path: "**/go.sum"
+      # The same steps as "Go on Windows" in the README: componentize-go's
+      # wrapper can't download its own Windows binary.
+      - name: Install componentize-go's Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "v0.5.3"
+          $sha256 = "253aec144b983c8d3c5d7fbfacc2e429e6beaa23b75f22cd0c8bb35ade66d06a"
+          $cache = Join-Path $env:LOCALAPPDATA "bytecodealliance\componentize-go"
+          $zip = Join-Path $env:TEMP "componentize-go-$version-windows-amd64.zip"
+          Invoke-WebRequest "https://github.com/bytecodealliance/componentize-go/releases/download/$version/componentize-go-windows-amd64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $sha256) { throw "$zip doesn't match the release checksum." }
+          Expand-Archive $zip -DestinationPath "$cache\bin" -Force
+          Copy-Item "$cache\bin\componentize-go.exe" "$cache\bin\componentize-go" -Force
+          Set-Content "$cache\version.txt" $version -NoNewline
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
