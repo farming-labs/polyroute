@@ -139,7 +139,7 @@ go get go.bytecodealliance.org/wasi@v0.1.2
 go get -tool github.com/bytecodealliance/componentize-go@v0.5.3
 ```
 
-The route needs its own `go.mod` because componentize-go only finds its WIT when it runs from the module root. Every `.go` file in the route's directory is part of the route, and editing any of them, or `go.mod`, rebuilds it in dev.
+The route needs its own `go.mod` because componentize-go only finds its WIT when it runs from the module root. It also only looks in modules that are already downloaded, so polyroute runs `go mod download` in the route's module before each build. The first build needs access to the Go module proxy, or a module cache that already has the route's dependencies. Every `.go` file in the route's directory is part of the route, and editing any of them, or `go.mod`, rebuilds it in dev.
 
 ### Python
 
