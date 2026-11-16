@@ -51,9 +51,21 @@ async function buildGoRoute({
   await mkdir(outDir, { recursive: true });
   const output = path.join(outDir, "route.wasm");
 
+  const missing = `Building \`${label}\` needs Go 1.27.1 or later, but \`go\` isn't on PATH. Install it from https://go.dev/dl.`;
+
+  // componentize-go finds the WASI WIT files through `go list -m`, which only
+  // sees modules that are already in the module cache, so fetch them first.
+  const download = await runTool("go", ["mod", "download"], { cwd: routeDir, missing });
+  if (download.exitCode !== 0) {
+    throw new PolyrouteError(
+      "BUILD_FAILED",
+      `\`go mod download\` couldn't fetch the modules \`${label}\` needs:\n\n${`${download.stdout}${download.stderr}`.trimEnd()}`,
+    );
+  }
+
   const result = await runTool("go", ["tool", "componentize-go", "build", "-o", output], {
     cwd: routeDir,
-    missing: `Building \`${label}\` needs Go 1.27.1 or later, but \`go\` isn't on PATH. Install it from https://go.dev/dl.`,
+    missing,
   });
   if (result.exitCode !== 0) {
     const diagnostics = `${result.stdout}${result.stderr}`.trimEnd();
