@@ -21,6 +21,11 @@ export interface Language {
   readonly extensions: readonly string[];
   /** How to export the handler in this language, appended to `MISSING_HANDLER` errors. */
   readonly handlerHint: string;
+  /**
+   * Requests one reused instance serves before the runtime replaces it. Set it
+   * for a language whose bindings leak memory on every request.
+   */
+  readonly requestsPerInstance?: number;
   /** Returns false for a file with a matching extension that polyroute should leave to Vite. */
   accepts?(routeFile: string): Promise<boolean>;
   build(input: RouteBuildInput): Promise<RouteBuildResult>;

@@ -18,7 +18,7 @@ The built server is plain JavaScript. The machine that runs it needs Node, nothi
 
 ## What it doesn't do
 
-- **It doesn't make routes faster than TypeScript.** Routes run as WebAssembly inside V8. A Rust route costs about 2× a TypeScript route per request, and Go and Python about 5–6×. See [Performance](#performance).
+- **It doesn't make routes faster than TypeScript.** Routes run as WebAssembly inside V8. A Rust route costs about 2× a TypeScript route per request, and Go and Python about 5–7×. See [Performance](#performance).
 - **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
 - **Routes can't make outbound HTTP requests yet.** The build fails if a route needs them. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [What a route can use](#what-a-route-can-use).
 
@@ -209,6 +209,7 @@ Each route keeps one instance of its component and hands it every request, one a
 - **A trap throws the instance away.** After a panic or an uncaught exception, the next request starts a new instance, so a trap can't affect later requests.
 - **Output belongs to its request.** What a route writes to stdout and stderr goes to the console. The stderr in a `ROUTE_TRAPPED` error is only from the request that trapped.
 - **The instance's memory stays allocated** while the process runs, once per route.
+- **A Go instance is replaced after 1,000 requests.** Go's WASI bindings (`go.bytecodealliance.org/pkg` v0.4.1) pin every buffer the host writes into the guest and never release it, so a Go instance's memory grows with every request. A package-level variable in a Go route lasts at most 1,000 requests.
 
 For strict isolation, give every request a fresh instance instead:
 
@@ -282,15 +283,15 @@ Measured with `pnpm bench` on the example's production build, with all routes se
 
 | Route                                           | Requests/s |     p50 |    p99 | With a fresh instance per request |
 | ----------------------------------------------- | ---------: | ------: | -----: | --------------------------------: |
-| TypeScript `GET /api/hello`                     |     25,363 | 0.34 ms | 1.7 ms |                                 – |
-| Rust `GET /api/primes?limit=2` (almost no work) |     11,050 | 0.66 ms | 3.5 ms |                             1,669 |
-| Rust `GET /api/primes?limit=10000`              |      5,881 |  1.3 ms | 4.0 ms |                             1,391 |
-| Go `GET /api/slug?text=hello`                   |      3,948 |  1.5 ms |  11 ms |                               348 |
-| Python `POST /api/stats`                        |      5,169 |  1.4 ms | 6.0 ms |                               144 |
+| TypeScript `GET /api/hello`                     |     26,243 | 0.33 ms | 1.7 ms |                                 – |
+| Rust `GET /api/primes?limit=2` (almost no work) |     11,214 | 0.66 ms | 2.8 ms |                             1,752 |
+| Rust `GET /api/primes?limit=10000`              |      5,766 |  1.3 ms | 4.2 ms |                             1,473 |
+| Go `GET /api/slug?text=hello`                   |      3,805 |  2.0 ms | 6.9 ms |                               328 |
+| Python `POST /api/stats`                        |      4,910 |  1.5 ms | 6.3 ms |                               144 |
 
-Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 1-second warmup, median shown. The last column is the same build with `instances: "per-request"`, measured in alternating rounds in the same run. An A/A run of two identical builds differed by under 2%, but single rounds varied by up to 10%, so read the numbers as rough. The gaps between columns are not.
+Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 1-second warmup, median shown. The last column is the same build with `instances: "per-request"`, measured in alternating rounds in the same run. The Go row includes replacing its instance every 1,000 requests (see [Instances](#instances)). An A/A run of two identical builds differed by under 2%, but single rounds varied by up to 10%, so read the numbers as rough. The gaps between columns are not.
 
-Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 2× for Rust and 5–6× for Go and Python here. A CPU profile of the Rust route under load puts 3.6% of the server's busy time in the route's own WebAssembly and about 45% in the bundled JavaScript around each call, mostly jco's glue. Most of the rest is Node's HTTP server.
+Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 2× for Rust and 5–7× for Go and Python here. A CPU profile of the Rust route under load puts 3.6% of the server's busy time in the route's own WebAssembly and about 45% in the bundled JavaScript around each call, mostly jco's glue. Most of the rest is Node's HTTP server.
 
 So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, where cold starts and multicore throughput are strong, is a planned addition.
 

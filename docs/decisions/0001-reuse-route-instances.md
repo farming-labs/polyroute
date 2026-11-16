@@ -32,3 +32,11 @@ A Rust, Go, or Python developer expects a server process whose globals live acro
 - An instance's memory stays allocated for the life of the process, once per route.
 - A guest that leaks memory or handles across requests now grows instead of being reset.
 - `"per-request"` remains available for routes that need strict isolation.
+
+## Update, 2026-11-16: Go instances are replaced after 1,000 requests
+
+A soak test found the leak the consequences warned about, in Go. `cabi_realloc` in `go.bytecodealliance.org/pkg` v0.4.1 pins every buffer the host allocates in the guest, such as the strings and lists that `wasi:http` imports return. The generated import bindings never unpin them. Under load, one reused Go instance's linear memory grew from 58 MB to 314 MB in 45 seconds, and its throughput halved as each new pin got slower. Rust's memory stayed flat, and Python's grew far more slowly without slowing down.
+
+A language can now set how many requests one instance serves before the runtime replaces it, and Go sets 1,000. Each Go instance then stays near 11 MB, and throughput holds steady. A 10,000-request limit measured within 2% of it, with more memory per instance. The replacement starts when the next request arrives, so that request waits for a new instance, as the first request does.
+
+The runtime now also checks, right before calling `handle`, that the instance it acquired hasn't been retired. Requests queued on one instance used to pass that check before any of them ran, so when one trapped, the requests behind it called the stopped instance and failed too.

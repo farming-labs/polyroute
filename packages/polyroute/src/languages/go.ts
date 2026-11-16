@@ -9,6 +9,16 @@ import type { Language, RouteBuildInput, RouteBuildResult } from "./types.js";
 export const COMPONENTIZE_GO_VERSION = "v0.5.3";
 export const GO_WASI_VERSION = "v0.1.2";
 
+/**
+ * Requests one reused Go instance serves before the runtime replaces it.
+ *
+ * `cabi_realloc` in `go.bytecodealliance.org/pkg` v0.4.1 pins every buffer the
+ * host allocates in the guest, such as the strings and lists an import returns,
+ * and the generated bindings never unpin them. So an instance's memory grows
+ * with every request, and each new pin costs more than the last.
+ */
+export const GO_REQUESTS_PER_INSTANCE = 1000;
+
 const SETUP = [
   `go get go.bytecodealliance.org/wasi@${GO_WASI_VERSION}`,
   `go get -tool github.com/bytecodealliance/componentize-go@${COMPONENTIZE_GO_VERSION}`,
@@ -23,6 +33,7 @@ export const go: Language = {
   extensions: [".go"],
   handlerHint:
     "Register a handler in `init()` with `wasihttp.HandleFunc` from `go.bytecodealliance.org/wasi/wasihttp`.",
+  requestsPerInstance: GO_REQUESTS_PER_INSTANCE,
   build: (input) => enqueue(() => buildGoRoute(input)),
 };
 
