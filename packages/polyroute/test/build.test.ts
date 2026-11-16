@@ -76,6 +76,11 @@ describe("production build", () => {
     expect(built.code).not.toMatch(/_lowerImportBackwardsCompat(?:\$\d+)?\.bind\(/);
   });
 
+  it("doesn't record every resource the host creates in a Set that only grows", () => {
+    expect(built.code).toMatch(/\._createdReps = /);
+    expect(built.code).not.toMatch(/_createdReps\.add\(/);
+  });
+
   it("serves a GET with the path, query, and request headers", async () => {
     const response = await routes.echo.fetch(
       new Request("http://localhost/api/echo?name=farm", { headers: { "x-greeting": "selam" } }),
