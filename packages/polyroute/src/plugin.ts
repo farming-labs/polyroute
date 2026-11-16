@@ -4,7 +4,36 @@ import { fileURLToPath } from "node:url";
 import type { Plugin, ResolvedConfig } from "vite";
 import { PolyrouteError } from "./errors.js";
 import { LANGUAGES, findLanguage } from "./languages/index.js";
+import { INSTANCE_MODES, type InstanceMode } from "./runtime/index.js";
 import { transpileRoute, type TranspiledRoute } from "./transpile.js";
+
+export interface PolyrouteOptions {
+  /**
+   * How a route's requests map to instances of its component.
+   *
+   * - `"reuse"` (default): one instance per route serves every request, one
+   *   at a time, the way a long-running server process does. Global state
+   *   persists between requests. An instance that traps is thrown away.
+   * - `"per-request"`: every request gets a fresh instance. Nothing survives a
+   *   request, at a large cost per request.
+   */
+  instances?: InstanceMode;
+}
+
+interface ResolvedPolyrouteOptions {
+  instances: InstanceMode;
+}
+
+function resolveOptions(options: PolyrouteOptions): ResolvedPolyrouteOptions {
+  const instances = options.instances ?? "reuse";
+  if (!INSTANCE_MODES.includes(instances)) {
+    throw new PolyrouteError(
+      "INVALID_OPTIONS",
+      `\`instances\` must be ${INSTANCE_MODES.map((mode) => `"${mode}"`).join(" or ")}, but it's ${JSON.stringify(instances)}.`,
+    );
+  }
+  return { instances };
+}
 
 const RUNTIME_ID = "@farming-labs/polyroute/runtime";
 const BINDINGS_ID = "virtual:polyroute/bindings/";
@@ -25,7 +54,11 @@ function toPosix(file: string): string {
   return file.split(path.sep).join("/");
 }
 
-export function createRouteModule(label: string, transpiled: TranspiledRoute): string {
+export function createRouteModule(
+  label: string,
+  transpiled: TranspiledRoute,
+  instances: InstanceMode,
+): string {
   const coreModules = Object.entries(transpiled.coreModules)
     .map(([name, encoded]) => `    ${JSON.stringify(name)}: ${JSON.stringify(encoded)},`)
     .join("\n");
@@ -35,6 +68,7 @@ export function createRouteModule(label: string, transpiled: TranspiledRoute): s
     "",
     "const route = createWasiHttpHandler({",
     `  route: ${JSON.stringify(label)},`,
+    `  instances: ${JSON.stringify(instances)},`,
     "  instantiate,",
     "  coreModules: {",
     coreModules,
@@ -52,7 +86,8 @@ export function createRouteModule(label: string, transpiled: TranspiledRoute): s
  * Builds route files written in other languages into modules that export a
  * web-standard fetch handler.
  */
-export function polyroute(): Plugin {
+export function polyroute(options: PolyrouteOptions = {}): Plugin {
+  const { instances } = resolveOptions(options);
   let config: ResolvedConfig;
   const bindings = new Map<string, string>();
 
@@ -111,7 +146,7 @@ export function polyroute(): Plugin {
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,
           { timestamp: true },
         );
-        return createRouteModule(label, transpiled);
+        return createRouteModule(label, transpiled, instances);
       },
     },
   };

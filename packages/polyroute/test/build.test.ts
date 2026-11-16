@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { polyroute } from "../src/index.js";
 import { buildRustRoute } from "../src/languages/rust.js";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
 import {
@@ -21,6 +22,11 @@ interface ServerEntry {
   pythonRaise: WasiHttpRoute;
   go: WasiHttpRoute;
   goPanic: WasiHttpRoute;
+  counter: WasiHttpRoute;
+}
+
+async function count(route: WasiHttpRoute, path = "/"): Promise<number> {
+  return Number(await (await route.fetch(new Request(`http://localhost${path}`))).text());
 }
 
 let outDir: string;
@@ -102,14 +108,89 @@ describe("production build", () => {
     });
   });
 
-  it("gives every request a fresh instance, so a trap doesn't affect the next request", async () => {
+  it("keeps serving other routes after one traps", async () => {
     await expect(routes.panic.fetch(new Request("http://localhost/"))).rejects.toThrow();
     const response = await routes.echo.fetch(new Request("http://localhost/after-panic"));
     expect(await response.text()).toContain("path=/after-panic\n");
   });
 });
 
+describe("reused instances (the default)", () => {
+  it("serves every request from one instance, so global state persists", async () => {
+    const first = await count(routes.counter);
+    expect([await count(routes.counter), await count(routes.counter)]).toEqual([
+      first + 1,
+      first + 2,
+    ]);
+  });
+
+  it("hands concurrent requests to the instance one at a time", async () => {
+    const counts = await Promise.all(Array.from({ length: 8 }, () => count(routes.counter)));
+    const sorted = [...counts].sort((a, b) => a - b);
+    expect(sorted).toEqual(Array.from({ length: 8 }, (_, index) => sorted[0]! + index));
+  });
+
+  it("throws away an instance that trapped, so the next request starts fresh", async () => {
+    await count(routes.counter);
+    await expect(routes.counter.fetch(new Request("http://localhost/panic"))).rejects.toMatchObject(
+      { code: "ROUTE_TRAPPED" },
+    );
+    expect(await count(routes.counter)).toBe(1);
+  });
+
+  it("puts only the trapped request's stderr in the error", async () => {
+    const before = await count(routes.counter);
+    const error = await routes.counter.fetch(new Request("http://localhost/panic")).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toMatchObject({
+      code: "ROUTE_TRAPPED",
+      message: expect.stringContaining(`counter panicked on request ${before + 1}`),
+    });
+    expect((error as Error).message).not.toMatch(
+      new RegExp(`counter served request ${before}$`, "m"),
+    );
+  });
+});
+
+describe('instances: "per-request"', () => {
+  let perRequest: { counter: WasiHttpRoute };
+
+  beforeAll(async () => {
+    const entry = await buildServerEntry(
+      "instances-entry.ts",
+      path.join(outDir, "per-request"),
+      fixturesDir,
+      { instances: "per-request" },
+    );
+    perRequest = (await import(pathToFileURL(entry.file).href)) as typeof perRequest;
+  });
+
+  it("gives every request a fresh instance, so no state survives a request", async () => {
+    const counts = [];
+    for (let index = 0; index < 3; index++) counts.push(await count(perRequest.counter));
+    expect(counts).toEqual([1, 1, 1]);
+  });
+
+  it("still turns a trap into ROUTE_TRAPPED and serves the next request", async () => {
+    await expect(
+      perRequest.counter.fetch(new Request("http://localhost/panic")),
+    ).rejects.toMatchObject({ code: "ROUTE_TRAPPED" });
+    expect(await count(perRequest.counter)).toBe(1);
+  });
+});
+
 describe("Python routes", () => {
+  it("answers repeated requests from one reused interpreter", async () => {
+    for (const name of ["one", "two", "three"]) {
+      const response = await routes.python.fetch(
+        new Request(`http://localhost/api/py?name=${name}`),
+      );
+      expect(await response.text()).toContain(`\nname=${name}\n`);
+    }
+  });
+
   it("serves GET with the path, query, headers, and a sibling module", async () => {
     const response = await routes.python.fetch(
       new Request("http://localhost/api/py?name=farm", { headers: { "x-greeting": "selam" } }),
@@ -153,6 +234,13 @@ describe("Python routes", () => {
 });
 
 describe("Go routes", () => {
+  it("answers repeated requests from one reused Go runtime", async () => {
+    for (const name of ["one", "two", "three"]) {
+      const response = await routes.go.fetch(new Request(`http://localhost/api/go?name=${name}`));
+      expect(await response.text()).toContain(`path=/api/go?name=${name}\n`);
+    }
+  });
+
   it("serves a net/http handler with the path, query, headers, and a second package file", async () => {
     const response = await routes.go.fetch(
       new Request("http://localhost/api/go?name=farm", { headers: { "x-greeting": "selam" } }),
@@ -185,6 +273,15 @@ describe("build-time checks", () => {
     await expect(
       buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound")),
     ).rejects.toThrow(/imports `wasi:http\/outgoing-handler`/);
+  });
+
+  it("rejects an `instances` value it doesn't know, naming the accepted ones", () => {
+    expect(() => polyroute({ instances: "shared" as never })).toThrow(
+      expect.objectContaining({
+        code: "INVALID_OPTIONS",
+        message: '`instances` must be "reuse" or "per-request", but it\'s "shared".',
+      }),
+    );
   });
 
   it("rejects a .rs route imported from browser code", async () => {

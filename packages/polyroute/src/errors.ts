@@ -1,4 +1,6 @@
 export type PolyrouteErrorCode =
+  /** An option passed to `polyroute()` has a value it doesn't accept. */
+  | "INVALID_OPTIONS"
   /** `cargo` isn't installed or isn't on `PATH`. */
   | "TOOLCHAIN_MISSING"
   /** The `wasm32-wasip2` Rust target isn't installed. */

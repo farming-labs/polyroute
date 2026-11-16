@@ -10,7 +10,8 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "smoke": "node scripts/smoke.mjs",
-    "smoke:packed": "node scripts/smoke.mjs --packed"
+    "smoke:packed": "node scripts/smoke.mjs --packed",
+    "bench": "node scripts/bench.mjs"
   },
   "devDependencies": {
     "oxfmt": "^0.78.0",

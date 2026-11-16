@@ -18,7 +18,7 @@ The built server is plain JavaScript. The machine that runs it needs Node, nothi
 
 ## What it doesn't do
 
-- **It doesn't make routes faster.** Routes run inside V8 here, with a fresh instance per request. Today that costs far more per request than a TypeScript route, and a Python route costs the most. See [Performance](#performance).
+- **It doesn't make routes faster than TypeScript.** Routes run as WebAssembly inside V8. A Rust route costs about 4× a TypeScript route per request, and Go and Python about 7–9×. See [Performance](#performance).
 - **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
 - **Routes can't make outbound HTTP requests yet.** The build fails if a route needs them. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [What a route can use](#what-a-route-can-use).
 
@@ -201,6 +201,28 @@ Core Wasm modules aren't components, so polyroute leaves them, and imports with 
 
 Every method reaches the route, and the route decides what to do with it.
 
+## Instances
+
+Each route keeps one instance of its component and hands it every request, one at a time, like a long-running server process:
+
+- **Global state persists between requests:** a `static` in Rust, a package-level variable in Go, a module global in Python. Use it for caches and lookup tables, and don't leave one request's data in it for the next.
+- **A trap throws the instance away.** After a panic or an uncaught exception, the next request starts a new instance, so a trap can't affect later requests.
+- **Output belongs to its request.** What a route writes to stdout and stderr goes to the console. The stderr in a `ROUTE_TRAPPED` error is only from the request that trapped.
+- **The instance's memory stays allocated** while the process runs, once per route.
+
+For strict isolation, give every request a fresh instance instead:
+
+```ts
+polyroute({ instances: "per-request" });
+```
+
+| `instances`         | Instances       | State between requests | Cost per request                              |
+| ------------------- | --------------- | ---------------------- | --------------------------------------------- |
+| `"reuse"` (default) | One per route   | Persists               | The handler                                   |
+| `"per-request"`     | One per request | None                   | Instantiating the component, then the handler |
+
+[docs/decisions/0001-reuse-route-instances.md](docs/decisions/0001-reuse-route-instances.md) explains the choice.
+
 ## How it works
 
 1. The language's toolchain compiles the route to a WebAssembly component:
@@ -210,7 +232,7 @@ Every method reaches the route, and the route decides what to do with it.
    - Prebuilt components are read as they are.
 2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. The output is cached by content hash.
 3. The bindings and the base64-encoded core modules are bundled into your server build, together with polyroute's runtime.
-4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. Each request gets a fresh instance, so nothing leaks between requests, and a panic or exception can't poison later ones.
+4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. The first request to a route instantiates its component, and later requests reuse that instance. See [Instances](#instances).
 
 ## What a route can use
 
@@ -239,6 +261,7 @@ Every error polyroute throws is a `PolyrouteError` with a stable `code`:
 
 | Code                         | When                                                                    |
 | ---------------------------- | ----------------------------------------------------------------------- |
+| `INVALID_OPTIONS`            | `polyroute()` got an option value it doesn't accept                     |
 | `TOOLCHAIN_MISSING`          | `cargo`, `go`, or `componentize-py` isn't on `PATH`                     |
 | `TARGET_MISSING`             | The `wasm32-wasip2` Rust target isn't installed                         |
 | `BUILD_FAILED`               | The route doesn't compile; the message includes the toolchain's output  |
@@ -255,28 +278,21 @@ A trapped request throws from `fetch`, so your framework's error handling decide
 
 ## Performance
 
-Measured on the example's production build, with all routes served by one Node process:
+Measured with `pnpm bench` on the example's production build, with all routes served by one Node process and every response body checked:
 
-| Route                                           | Requests/s |    p50 |    p99 |
-| ----------------------------------------------- | ---------: | -----: | -----: |
-| TypeScript `GET /api/hello`                     |     28,459 |   0 ms |   1 ms |
-| Rust `GET /api/primes?limit=2` (almost no work) |        864 |   8 ms |  43 ms |
-| Go `GET /api/slug?text=hello`                   |        146 |  56 ms | 196 ms |
-| Python `POST /api/stats`                        |         76 | 111 ms | 382 ms |
+| Route                                           | Requests/s |     p50 |    p99 | With a fresh instance per request |
+| ----------------------------------------------- | ---------: | ------: | -----: | --------------------------------: |
+| TypeScript `GET /api/hello`                     |     25,222 | 0.34 ms | 1.8 ms |                                 – |
+| Rust `GET /api/primes?limit=2` (almost no work) |      5,973 |  1.2 ms | 6.6 ms |                             1,410 |
+| Rust `GET /api/primes?limit=10000`              |      3,989 |  2.0 ms | 6.1 ms |                             1,113 |
+| Go `GET /api/slug?text=hello`                   |      2,954 |  2.1 ms |  13 ms |                               273 |
+| Python `POST /api/stats`                        |      3,473 |  2.2 ms | 7.2 ms |                               140 |
 
-Apple M1, Node 24.21.0, autocannon with 10 connections, three interleaved 5-second runs per route, median shown. With 10 requests in flight on one event loop, latency includes queueing: the time spent on each request is roughly one second divided by the requests per second, about 1.2 ms for Rust, 7 ms for Go, and 13 ms for Python. Two back-to-back runs of the TypeScript route matched in this session, but an earlier session measured 34% between such runs, so read these as rough. The gaps between languages are not.
+Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 1-second warmup, median shown. The last column is the build from before instances were reused, measured in alternating rounds in the same run. That's the work `instances: "per-request"` still does for every request. An A/A run of two identical builds differed by under 2%, but single rounds varied by up to 10%, and Python had one slow round at 1,814, so read the numbers as rough. The gaps between columns are not.
 
-Most of the cost comes from the fresh instance per request, and it grows with the size of the component:
+Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 4× for Rust and 7–9× for Go and Python here. A CPU profile of the Rust route under load puts only 2.5% of the server's time in the route's own WebAssembly. Most of the rest is in the JavaScript that jco generates around each call.
 
-| Route  | Component size |
-| ------ | -------------: |
-| Rust   |        254 KiB |
-| Go     |      6,913 KiB |
-| Python |     18,516 KiB |
-
-Profiling a Rust route in process showed about 140 µs to instantiate the component and about 325 µs for the first call into it. A Python component carries an interpreter and a snapshot of its heap, so each instance copies far more memory.
-
-So use polyroute today when you want to write a route in another language and deploy it wherever Node runs, not for speed. Running components under wasmtime, where cold starts and multicore throughput are strong, is a planned addition.
+So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, where cold starts and multicore throughput are strong, is a planned addition.
 
 ## Limits
 
@@ -298,6 +314,7 @@ pnpm install
 pnpm test           # unit, production build, and dev server tests
 pnpm smoke          # build the example and check every route over HTTP
 pnpm smoke:packed   # the same, installed from a packed tarball outside the workspace
+pnpm bench          # measure every route of the example's production build
 ```
 
 ## License
