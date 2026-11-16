@@ -121,6 +121,12 @@ const checks = [
     send: '"nope"',
     status: 400,
   },
+  {
+    name: "Go route reads the query",
+    path: "/api/slug?text=Hello%20World,%20Farm!",
+    status: 200,
+    body: '{"slug":"hello-world-farm","text":"Hello World, Farm!"}\n',
+  },
   { name: "unknown path", path: "/api/missing", status: 404 },
 ];
 

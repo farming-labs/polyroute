@@ -19,6 +19,8 @@ interface ServerEntry {
   crate: WasiHttpRoute;
   python: WasiHttpRoute;
   pythonRaise: WasiHttpRoute;
+  go: WasiHttpRoute;
+  goPanic: WasiHttpRoute;
 }
 
 let outDir: string;
@@ -146,6 +148,34 @@ describe("Python routes", () => {
     await expect(routes.pythonRaise.fetch(new Request("http://localhost/"))).rejects.toMatchObject({
       code: "ROUTE_TRAPPED",
       message: expect.stringContaining("RuntimeError: fixture route raised on purpose"),
+    });
+  });
+});
+
+describe("Go routes", () => {
+  it("serves a net/http handler with the path, query, headers, and a second package file", async () => {
+    const response = await routes.go.fetch(
+      new Request("http://localhost/api/go?name=farm", { headers: { "x-greeting": "selam" } }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-served-by")).toBe("go");
+    expect(await response.text()).toBe(
+      "method=GET\npath=/api/go?name=farm\ngreeting=selam\nhello from a second file in the package\nbody=\n",
+    );
+  });
+
+  it("passes the request body through and returns the status the handler wrote", async () => {
+    const response = await routes.go.fetch(
+      new Request("http://localhost/api/go", { method: "POST", body: "hello from js" }),
+    );
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("body=hello from js\n");
+  });
+
+  it("turns a panic into ROUTE_TRAPPED that carries the panic message", async () => {
+    await expect(routes.goPanic.fetch(new Request("http://localhost/"))).rejects.toMatchObject({
+      code: "ROUTE_TRAPPED",
+      message: expect.stringContaining("fixture route panicked on purpose"),
     });
   });
 });

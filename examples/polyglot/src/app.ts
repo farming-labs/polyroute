@@ -4,10 +4,10 @@ type RouteModule = Partial<Record<string, Handler>>;
 // Routes in every language are discovered the same way. polyroute turns each
 // non-TypeScript route into a module with GET, POST, and the other method
 // exports, and the route itself decides which methods it accepts.
-const modules = import.meta.glob<RouteModule>("../app/**/route.{ts,rs,py}", { eager: true });
+const modules = import.meta.glob<RouteModule>("../app/**/route.{ts,rs,py,go}", { eager: true });
 
 const routes = Object.entries(modules).map(([file, module]) => ({
-  pathname: file.replace(/^\.\.\/app/, "").replace(/\/route\.(ts|rs|py)$/, "") || "/",
+  pathname: file.replace(/^\.\.\/app/, "").replace(/\/route\.(ts|rs|py|go)$/, "") || "/",
   module,
 }));
 

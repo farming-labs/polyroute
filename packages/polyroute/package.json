@@ -1,9 +1,13 @@
 {
   "name": "@farming-labs/polyroute",
   "version": "0.0.0",
-  "description": "Write web routes in Rust and serve them as standard fetch handlers.",
+  "description": "Write web routes in Rust, Go, or Python and serve them as standard fetch handlers.",
   "keywords": [
+    "component-model",
     "fetch",
+    "go",
+    "polyglot",
+    "python",
     "rust",
     "vite",
     "vite-plugin",
