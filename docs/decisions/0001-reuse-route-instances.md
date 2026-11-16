@@ -40,3 +40,7 @@ A soak test found the leak the consequences warned about, in Go. `cabi_realloc` 
 A language can now set how many requests one instance serves before the runtime replaces it, and Go sets 1,000. Each Go instance then stays near 11 MB, and throughput holds steady. A 10,000-request limit measured within 2% of it, with more memory per instance. The replacement starts when the next request arrives, so that request waits for a new instance, as the first request does.
 
 The runtime now also checks, right before calling `handle`, that the instance it acquired hasn't been retired. Requests queued on one instance used to pass that check before any of them ran, so when one trapped, the requests behind it called the stopped instance and failed too.
+
+## Update, 2026-11-16: jco's handle tables no longer grow with every request
+
+jco adds the rep of every resource it hands the guest to a Set on that resource's handle table, and nothing reads or empties the Set. With a fresh instance per request, that didn't matter. A reused instance's Sets grow by 9 to 11 entries a request. On the example's Rust route the heap grew by about 90 MB over 400,000 requests, and the busiest Set would reach V8's limit of 2^24 entries after about 8.4 million, past which `Set.add` throws. The transpiled bindings now skip the `add` when the Sets have no other use. The heap then stays flat, and each request is about 15% cheaper in-process.

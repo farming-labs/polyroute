@@ -14,7 +14,7 @@ import {
 import { skipSyncTaskBookkeeping } from "./sync-imports.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 4;
+const CACHE_FORMAT = 5;
 
 // jco marks its output with this directive. It has no meaning to JavaScript
 // engines, and bundlers warn that they can't preserve it.
@@ -30,6 +30,25 @@ function readJcoDebugOnce(bindings: string): string {
   if (!bindings.includes(JCO_DEBUG_READ)) return bindings;
   const body = bindings.replaceAll(JCO_DEBUG_READ, JCO_DEBUG_FLAG);
   return `const ${JCO_DEBUG_FLAG} = Boolean(${JCO_DEBUG_READ});\n${body}`;
+}
+
+// jco adds the rep of every resource it hands the guest to a Set on that
+// resource's handle table, and nothing reads or empties it. Reps come from
+// counters that only go up, so a reused instance's Sets grow by 9 to 11 entries
+// a request: about 90 MB after 400,000 requests to the example's Rust route.
+// The busiest Set gains 2 entries a request, so after about 8.4 million it would
+// reach V8's limit of 2^24 entries, past which `Set.add` throws. The bindings
+// skip the `add` when the Sets have no other use.
+const CREATED_REPS = /\b_createdReps\b/g;
+const CREATED_REPS_TABLE = /\b\w+\._createdReps = new Set\(\);/g;
+const CREATED_REPS_ADD = "\ttable._createdReps.add(rep);\n";
+
+function skipCreatedRepsSet(bindings: string): string {
+  const uses = bindings.match(CREATED_REPS)?.length ?? 0;
+  const tables = bindings.match(CREATED_REPS_TABLE)?.length ?? 0;
+  const adds = bindings.split(CREATED_REPS_ADD).length - 1;
+  if (adds !== 1 || uses !== tables + 1) return bindings;
+  return bindings.replace(CREATED_REPS_ADD, "");
 }
 
 export interface TranspiledRoute {
@@ -93,7 +112,7 @@ export async function transpileRoute(
   for (const [name, bytes] of Object.entries(result.files)) {
     if (name === "route.js") {
       const source = readJcoDebugOnce(decoder.decode(bytes).replace(COMPONENT_DIRECTIVE, ""));
-      bindings = skipSyncTaskBookkeeping(source).bindings;
+      bindings = skipCreatedRepsSet(skipSyncTaskBookkeeping(source).bindings);
     } else if (name.endsWith(".wasm")) coreModules[name] = Buffer.from(bytes).toString("base64");
   }
   if (bindings === undefined) {
