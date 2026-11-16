@@ -52,6 +52,11 @@ export interface WasiHttpHandlerOptions {
   coreModules: Readonly<Record<string, string>>;
   /** Defaults to `"reuse"`. */
   instances?: InstanceMode;
+  /**
+   * Replaces a reused instance after it has served this many requests, for
+   * guests whose memory grows with every request. Defaults to no limit.
+   */
+  requestsPerInstance?: number;
 }
 
 export interface WasiHttpRoute {
@@ -102,6 +107,7 @@ interface Slot {
   instance: RouteInstance;
   stdout: Relay;
   stderr: Relay;
+  served: number;
   retired: boolean;
 }
 
@@ -110,7 +116,16 @@ interface Slot {
  * See {@link InstanceMode} for how requests share instances.
  */
 export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttpRoute {
-  const { route } = options;
+  const { route, requestsPerInstance = Infinity } = options;
+  if (
+    requestsPerInstance !== Infinity &&
+    !(Number.isInteger(requestsPerInstance) && requestsPerInstance > 0)
+  ) {
+    throw new PolyrouteError(
+      "INVALID_OPTIONS",
+      `\`requestsPerInstance\` must be a positive integer, but it's ${String(requestsPerInstance)}.`,
+    );
+  }
   const reuse = (options.instances ?? "reuse") === "reuse";
   const compiled = new Map<string, Promise<WebAssembly.Module>>();
   // Output written outside a request, such as while a reused instance starts.
@@ -141,7 +156,7 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
     const relays = { stdout: createRelay(stdout), stderr: createRelay(stderr) };
     try {
       const instance = await options.instantiate(getCoreModule, createImports(relays));
-      return { instance, ...relays, retired: false };
+      return { instance, ...relays, served: 0, retired: false };
     } catch (error) {
       if (error instanceof PolyrouteError) throw error;
       throw new PolyrouteError(
@@ -174,7 +189,7 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       }
       const current = shared;
       const slot = await current;
-      // Another request may have trapped this instance while this one waited.
+      // Another request may have retired this instance while this one waited.
       if (!slot.retired) return slot;
       if (shared === current) shared = undefined;
     }
@@ -202,9 +217,11 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
     });
 
-    const slot = reuse ? await acquireShared() : await instantiateSlot(stdout, stderr);
-    // `handle` runs synchronously and nothing below awaits before it returns,
-    // so no other request can reach this instance until this one is done.
+    let slot = reuse ? await acquireShared() : await instantiateSlot(stdout, stderr);
+    // Requests that were queued on the same instance resume first, and one of
+    // them may have retired it. From this check to the end of `handle` nothing
+    // awaits, so no other request can reach the instance until this one is done.
+    while (slot.retired) slot = await acquireShared();
     const { instance } = slot;
     slot.stdout.target = stdout;
     slot.stderr.target = stderr;
@@ -242,7 +259,8 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       stderr.end();
       slot.stdout.target = idle.stdout;
       slot.stderr.target = idle.stderr;
-      if (!reuse && !slot.retired) retire(slot);
+      slot.served++;
+      if (!slot.retired && (!reuse || slot.served >= requestsPerInstance)) retire(slot);
     }
 
     if (result === undefined) {

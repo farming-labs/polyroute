@@ -4,8 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
+import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
 import { buildRustRoute } from "../src/languages/rust.js";
-import type { WasiHttpRoute } from "../src/runtime/index.js";
+import { createWasiHttpHandler, type WasiHttpRoute } from "../src/runtime/index.js";
 import {
   buildClientEntry,
   buildServerEntry,
@@ -23,6 +24,7 @@ interface ServerEntry {
   go: WasiHttpRoute;
   goPanic: WasiHttpRoute;
   counter: WasiHttpRoute;
+  goCounter: WasiHttpRoute;
 }
 
 async function count(route: WasiHttpRoute, path = "/"): Promise<number> {
@@ -162,6 +164,15 @@ describe("reused instances (the default)", () => {
       new RegExp(`counter served request ${before}$`, "m"),
     );
   });
+
+  it("hands requests that were waiting on an instance that trapped to a new one", async () => {
+    const [trapped, ...rest] = await Promise.allSettled([
+      routes.counter.fetch(new Request("http://localhost/panic")),
+      ...Array.from({ length: 5 }, () => count(routes.counter)),
+    ]);
+    expect(trapped).toMatchObject({ status: "rejected", reason: { code: "ROUTE_TRAPPED" } });
+    expect(rest).toEqual([1, 2, 3, 4, 5].map((value) => ({ status: "fulfilled", value })));
+  });
 });
 
 describe('instances: "per-request"', () => {
@@ -299,6 +310,24 @@ describe("Go routes", () => {
       message: expect.stringContaining("fixture route panicked on purpose"),
     });
   });
+
+  it("replaces an instance after it has served GO_REQUESTS_PER_INSTANCE requests", async () => {
+    const counts = [];
+    for (let index = 0; index <= GO_REQUESTS_PER_INSTANCE; index++) {
+      counts.push(await count(routes.goCounter));
+    }
+    expect(counts.slice(0, 3)).toEqual([1, 2, 3]);
+    expect(counts.at(-2)).toBe(GO_REQUESTS_PER_INSTANCE);
+    expect(counts.at(-1)).toBe(1);
+  });
+
+  it("serves concurrent requests across a replacement without failing any", async () => {
+    const counts = await Promise.all(
+      Array.from({ length: 2 * GO_REQUESTS_PER_INSTANCE + 3 }, () => count(routes.goCounter)),
+    );
+    expect(Math.max(...counts)).toBe(GO_REQUESTS_PER_INSTANCE);
+    expect(counts.filter((value) => value === 1).length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe("build-time checks", () => {
@@ -315,6 +344,24 @@ describe("build-time checks", () => {
         message: '`instances` must be "reuse" or "per-request", but it\'s "shared".',
       }),
     );
+  });
+
+  it("rejects a `requestsPerInstance` that isn't a positive integer", () => {
+    for (const requestsPerInstance of [0, 1.5, Number.NaN]) {
+      expect(() =>
+        createWasiHttpHandler({
+          route: "route.go",
+          instantiate: () => Promise.reject(new Error("unused")),
+          coreModules: {},
+          requestsPerInstance,
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "INVALID_OPTIONS",
+          message: `\`requestsPerInstance\` must be a positive integer, but it's ${requestsPerInstance}.`,
+        }),
+      );
+    }
   });
 
   it("rejects a .rs route imported from browser code", async () => {

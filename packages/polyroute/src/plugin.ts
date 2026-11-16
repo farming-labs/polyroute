@@ -58,6 +58,7 @@ export function createRouteModule(
   label: string,
   transpiled: TranspiledRoute,
   instances: InstanceMode,
+  requestsPerInstance?: number,
 ): string {
   const coreModules = Object.entries(transpiled.coreModules)
     .map(([name, encoded]) => `    ${JSON.stringify(name)}: ${JSON.stringify(encoded)},`)
@@ -69,6 +70,9 @@ export function createRouteModule(
     "const route = createWasiHttpHandler({",
     `  route: ${JSON.stringify(label)},`,
     `  instances: ${JSON.stringify(instances)},`,
+    ...(requestsPerInstance === undefined
+      ? []
+      : [`  requestsPerInstance: ${JSON.stringify(requestsPerInstance)},`]),
     "  instantiate,",
     "  coreModules: {",
     coreModules,
@@ -146,7 +150,7 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,
           { timestamp: true },
         );
-        return createRouteModule(label, transpiled, instances);
+        return createRouteModule(label, transpiled, instances, language.requestsPerInstance);
       },
     },
   };
