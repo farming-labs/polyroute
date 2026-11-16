@@ -95,16 +95,21 @@ async function writeIfChanged(file: string, content: string): Promise<void> {
   if (current !== content) await writeFile(file, content);
 }
 
-/** Every `.py` file under the route's directory, for the dev server to watch. */
-async function listPythonSources(routeDir: string): Promise<string[]> {
-  const entries = await readdir(routeDir, { recursive: true });
-  return entries
-    .filter((entry) => entry.endsWith(".py"))
-    .filter((entry) =>
-      entry
-        .split(path.sep)
-        .slice(0, -1)
-        .every((segment) => !segment.startsWith(".") && !IGNORED_DIRS.has(segment)),
-    )
-    .map((entry) => path.join(routeDir, entry));
+/**
+ * Every `.py` file under the route's directory, for the dev server to watch.
+ * Hidden and dependency directories are skipped without being read.
+ */
+async function listPythonSources(dir: string): Promise<string[]> {
+  const sources: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!entry.name.startsWith(".") && !IGNORED_DIRS.has(entry.name)) {
+        sources.push(...(await listPythonSources(file)));
+      }
+    } else if (entry.name.endsWith(".py")) {
+      sources.push(file);
+    }
+  }
+  return sources;
 }
