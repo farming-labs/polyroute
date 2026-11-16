@@ -15,7 +15,7 @@ importers:
         specifier: ^1.93.0
         version: 1.93.0
 
-  examples/rust-route:
+  examples/polyglot:
     dependencies:
       '@farming-labs/polyroute':
         specifier: workspace:*
