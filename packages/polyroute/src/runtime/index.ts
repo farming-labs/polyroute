@@ -75,6 +75,9 @@ export interface WasiHttpRoute {
 }
 
 const STDERR_TAIL_LINES = 20;
+// Built once: `abort()` without a reason builds a DOMException on every
+// request, which costs several times more than the rest of the abort.
+const ROUTE_ANSWERED = new DOMException("The route answered its request.", "AbortError");
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 /**
@@ -293,7 +296,7 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
         { cause: error },
       );
     } finally {
-      controller?.abort();
+      controller?.abort(ROUTE_ANSWERED);
       if (slot.outbound !== undefined) slot.outbound.signal = undefined;
       stdout.end();
       stderr.end();

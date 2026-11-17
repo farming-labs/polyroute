@@ -8,6 +8,8 @@ import {
   FutureIncomingResponse,
   OutgoingBody,
   OutgoingRequest,
+  OutgoingResponse,
+  ResponseOutparam,
   createImports,
   createLineSink,
   type OutboundContext,
@@ -304,6 +306,41 @@ describe("wasi:http/outgoing-handler", () => {
 });
 
 describe("a route that sends requests", () => {
+  it("cancels the requests it's still waiting on once it has answered", async () => {
+    let future: FutureIncomingResponse | undefined;
+    const route = createWasiHttpHandler({
+      route: "route.rs",
+      coreModules: {},
+      outbound: { allow: [base.hostname] },
+      instantiate: (_getCoreModule, imports) => ({
+        incomingHandler: {
+          handle(_request, responseOut) {
+            const outgoing = new OutgoingRequest(new Fields());
+            outgoing.setScheme({ tag: "HTTP" });
+            outgoing.setAuthority(base.host);
+            outgoing.setPathWithQuery("/no-headers");
+            const handle = imports["wasi:http/outgoing-handler"].handle as (
+              request: OutgoingRequest,
+              options: undefined,
+            ) => FutureIncomingResponse;
+            future = handle(outgoing, undefined);
+            ResponseOutparam.set(responseOut, {
+              tag: "ok",
+              val: new OutgoingResponse(new Fields()),
+            });
+            return undefined;
+          },
+        },
+      }),
+    });
+    expect((await route.fetch(new Request("http://localhost/"))).status).toBe(200);
+    await future!.subscribe().block();
+    expect(future!.get()).toEqual({
+      tag: "ok",
+      val: { tag: "err", val: { tag: "internal-error", val: "The route answered its request." } },
+    });
+  });
+
   it("fails on a runtime without JSPI, naming the runtime it needs", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(WebAssembly, "Suspending");
     if (descriptor !== undefined) delete (WebAssembly as { Suspending?: unknown }).Suspending;
