@@ -6,6 +6,8 @@
 //   node scripts/bench.mjs --baseline <file>    also measure another build of
 //                                               dist/server.js, alternating rounds
 //   node scripts/bench.mjs --no-build --rounds 5 --duration 5 --connections 10
+//   node scripts/bench.mjs --cold --rounds 10   time from starting a fresh server
+//                                               to each route's first response
 //
 // Pass this build's own dist/server.js as --baseline to measure run-to-run noise.
 
@@ -20,6 +22,7 @@ const { values: flags } = parseArgs({
   options: {
     baseline: { type: "string" },
     build: { type: "boolean", default: true },
+    cold: { type: "boolean", default: false },
     "no-build": { type: "boolean", default: false },
     rounds: { type: "string", default: "3" },
     duration: { type: "string", default: "5" },
@@ -162,6 +165,52 @@ if (flags.baseline !== undefined) {
   builds.unshift({ label: "baseline", file: path.resolve(flags.baseline) });
 }
 
+const environment = `${cpus()[0]?.model ?? "unknown CPU"}, ${process.platform} ${process.arch}, Node ${process.versions.node}.`;
+
+if (flags.cold) {
+  // Each sample starts a new server process and sends one request, the way a
+  // serverless instance handles its first request.
+  const samples = new Map();
+  for (let round = 1; round <= rounds; round++) {
+    for (const route of routes) {
+      const order = round % 2 === 1 ? builds : [...builds].reverse();
+      for (const build of order) {
+        const started = performance.now();
+        const { child, origin } = startServer(build.file);
+        let ok;
+        try {
+          ok = await request(await origin, route);
+        } finally {
+          await stopServer(child);
+        }
+        const ms = performance.now() - started;
+        if (!ok) {
+          console.error(`${build.label}: ${route.name} didn't answer 200 with the expected body.`);
+          process.exit(1);
+        }
+        const key = `${route.name}\0${build.label}`;
+        samples.set(key, [...(samples.get(key) ?? []), ms]);
+        console.error(
+          `round ${round}/${rounds}  ${build.label.padEnd(8)}  ${route.name.padEnd(24)}  ${Math.round(ms)} ms`,
+        );
+      }
+    }
+  }
+  console.log(
+    `\n${environment} Time from starting a new server to the first response, ${rounds} runs per route and build. Median of runs.\n`,
+  );
+  console.log("| Route | Build | Cold start | range |");
+  console.log("| --- | --- | ---: | ---: |");
+  for (const route of routes) {
+    for (const build of builds) {
+      const ms = samples.get(`${route.name}\0${build.label}`) ?? [];
+      const range = `${Math.round(Math.min(...ms))}–${Math.round(Math.max(...ms))} ms`;
+      console.log(`| ${route.name} | ${build.label} | ${Math.round(median(ms))} ms | ${range} |`);
+    }
+  }
+  process.exit(0);
+}
+
 const servers = await Promise.all(
   builds.map(async (build) => {
     const { child, origin } = startServer(build.file);
@@ -204,7 +253,7 @@ if (failed) process.exit(1);
 
 const formatMs = (ms) => (ms < 1 ? `${ms.toFixed(2)} ms` : `${ms.toFixed(1)} ms`);
 console.log(
-  `\n${cpus()[0]?.model ?? "unknown CPU"}, ${process.platform} ${process.arch}, Node ${process.versions.node}. ` +
+  `\n${environment} ` +
     `${connections} connections, ${rounds} rounds of ${durationMs / 1000} s per route and build after a ${warmupMs / 1000} s warmup. Median of rounds.\n`,
 );
 const header = ["Route", "Build", "req/s", "range", "p50", "p99", "errors"];

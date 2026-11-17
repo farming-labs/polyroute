@@ -48,8 +48,12 @@ export interface WasiHttpHandlerOptions {
   /** The route's source path, used in error messages. */
   route: string;
   instantiate: InstantiateRoute;
-  /** Core Wasm modules of the transpiled component, base64-encoded, keyed by file name. */
-  coreModules: Readonly<Record<string, string>>;
+  /**
+   * Core Wasm modules of the transpiled component, keyed by file name. Each is
+   * either the module's bytes, base64-encoded, or the `file:` URL of a file the
+   * build wrote next to the bundle.
+   */
+  coreModules: Readonly<Record<string, string | URL>>;
   /** Defaults to `"reuse"`. */
   instances?: InstanceMode;
   /**
@@ -76,6 +80,31 @@ function decodeBase64(encoded: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   return bytes;
+}
+
+// The import is dynamic so the runtime still loads where there is no
+// `node:fs`, as long as every core module is inline.
+async function readCoreModuleFile(
+  route: string,
+  name: string,
+  url: URL,
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (url.protocol !== "file:") {
+    throw new PolyrouteError(
+      "ROUTE_INSTANTIATION_FAILED",
+      `Route \`${route}\` can only read its core module \`${name}\` from a \`file:\` URL, but it got \`${url.href}\`.`,
+    );
+  }
+  const { readFile } = await import("node:fs/promises");
+  try {
+    return await readFile(url);
+  } catch (error) {
+    throw new PolyrouteError(
+      "ROUTE_INSTANTIATION_FAILED",
+      `Route \`${route}\` couldn't read its core module \`${name}\` (${error instanceof Error ? error.message : String(error)}). Deploy the \`polyroute\` directory that \`vite build\` writes next to the server bundle.`,
+      { cause: error },
+    );
+  }
 }
 
 function describeErrorCode(code: ErrorCode): string {
@@ -137,8 +166,8 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
   const getCoreModule = (path: string): Promise<WebAssembly.Module> => {
     let module = compiled.get(path);
     if (module === undefined) {
-      const encoded = options.coreModules[path];
-      if (encoded === undefined) {
+      const source = options.coreModules[path];
+      if (source === undefined) {
         return Promise.reject(
           new PolyrouteError(
             "ROUTE_INSTANTIATION_FAILED",
@@ -146,8 +175,16 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
           ),
         );
       }
-      module = WebAssembly.compile(decodeBase64(encoded));
-      compiled.set(path, module);
+      const pending =
+        typeof source === "string"
+          ? WebAssembly.compile(decodeBase64(source))
+          : readCoreModuleFile(route, path, source).then((bytes) => WebAssembly.compile(bytes));
+      compiled.set(path, pending);
+      // A failed read or compile isn't kept, so the next request tries again.
+      pending.catch(() => {
+        if (compiled.get(path) === pending) compiled.delete(path);
+      });
+      module = pending;
     }
     return module;
   };
