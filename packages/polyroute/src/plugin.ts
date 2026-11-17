@@ -69,15 +69,31 @@ function toPosix(file: string): string {
   return file.split(path.sep).join("/");
 }
 
+/** Where a build writes a core module, relative to the chunk that loads it. */
+function coreModuleFile(key: string, name: string): string {
+  return `polyroute/${key}/${name}`;
+}
+
+/**
+ * The module a route file compiles to. With `coreModuleFiles`, it loads its
+ * core modules from files next to its chunk instead of carrying them inline, so
+ * a server bundle doesn't parse every route's WebAssembly when it starts.
+ */
 export function createRouteModule(
   label: string,
   transpiled: TranspiledRoute,
   instances: InstanceMode,
   requestsPerInstance?: number,
+  coreModuleFiles = false,
   outbound?: OutboundOptions,
 ): string {
   const coreModules = Object.entries(transpiled.coreModules)
-    .map(([name, encoded]) => `    ${JSON.stringify(name)}: ${JSON.stringify(encoded)},`)
+    .map(([name, encoded]) => {
+      const source = coreModuleFiles
+        ? `new URL(${JSON.stringify(`./${coreModuleFile(transpiled.key, name)}`)}, import.meta.url)`
+        : JSON.stringify(encoded);
+      return `    ${JSON.stringify(name)}: ${source},`;
+    })
     .join("\n");
   return [
     `import { createWasiHttpHandler } from ${JSON.stringify(RUNTIME_ID)};`,
@@ -111,6 +127,9 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
   const { instances, outbound } = resolveOptions(options);
   let config: ResolvedConfig;
   const bindings = new Map<string, string>();
+  // Route modules a build loads, by module ID, so their core modules can be
+  // written next to whichever chunk each one ends up in.
+  const builtRoutes = new Map<string, TranspiledRoute>();
 
   return {
     name: "polyroute",
@@ -173,13 +192,40 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,
           { timestamp: true },
         );
+        const coreModuleFiles = config.command === "build";
+        if (coreModuleFiles) builtRoutes.set(id, transpiled);
         return createRouteModule(
           label,
           transpiled,
           instances,
           language.requestsPerInstance,
+          coreModuleFiles,
           transpiled.outbound ? outbound : undefined,
         );
+      },
+    },
+
+    generateBundle: {
+      // After Vite's own hook, which drops every emitted asset from a server
+      // build unless `build.emitAssets` is set. These files are code the server
+      // reads at runtime, so they're emitted once that has run.
+      order: "post",
+      handler(_, bundle) {
+        const emitted = new Set<string>();
+        for (const chunk of Object.values(bundle)) {
+          if (chunk.type !== "chunk") continue;
+          const dir = path.posix.dirname(chunk.fileName);
+          for (const id of chunk.moduleIds) {
+            const transpiled = builtRoutes.get(id);
+            if (transpiled === undefined) continue;
+            for (const [name, encoded] of Object.entries(transpiled.coreModules)) {
+              const fileName = path.posix.join(dir, coreModuleFile(transpiled.key, name));
+              if (emitted.has(fileName)) continue;
+              emitted.add(fileName);
+              this.emitFile({ type: "asset", fileName, source: Buffer.from(encoded, "base64") });
+            }
+          }
+        }
       },
     },
   };
