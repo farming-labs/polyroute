@@ -1,7 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
 import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
@@ -79,6 +81,28 @@ describe("production build", () => {
   it("doesn't record every resource the host creates in a Set that only grows", () => {
     expect(built.code).toMatch(/\._createdReps = /);
     expect(built.code).not.toMatch(/_createdReps\.add\(/);
+  });
+
+  it("writes each route's core modules to files next to the bundle instead of inlining them", async () => {
+    // A base64 string this long can only be an inlined core module.
+    expect(built.code).not.toMatch(/"[A-Za-z0-9+/]{4096,}={0,2}"/);
+    const referenced = [
+      ...built.code.matchAll(
+        /new URL\("\.\/(polyroute\/[0-9a-f]{32}\/[^"]+\.wasm)", import\.meta\.url\)/g,
+      ),
+    ].map((match) => match[1]);
+    expect(referenced.length).toBeGreaterThan(0);
+    const root = path.dirname(built.file);
+    const written = (
+      await readdir(path.join(root, "polyroute"), { recursive: true, withFileTypes: true })
+    )
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.relative(root, path.join(entry.parentPath, entry.name)))
+      .map((file) => file.split(path.sep).join("/"));
+    expect(written.sort()).toEqual([...new Set(referenced)].sort());
+    for (const file of written) {
+      expect(WebAssembly.validate(await readFile(path.join(root, file)))).toBe(true);
+    }
   });
 
   it("serves a GET with the path, query, and request headers", async () => {
@@ -235,6 +259,54 @@ describe("host calls", () => {
       Object.defineProperty(IncomingRequest.prototype, "method", method);
     }
     expect(await count(route)).toBe(1);
+  });
+});
+
+describe("a route in a lazily loaded chunk", () => {
+  let lazyDir: string;
+  let loadEcho: () => Promise<{ default: WasiHttpRoute }>;
+
+  beforeAll(async () => {
+    lazyDir = path.join(outDir, "lazy");
+    await build({
+      root: fixturesDir,
+      configFile: false,
+      logLevel: "silent",
+      cacheDir,
+      plugins: [polyroute()],
+      build: {
+        ssr: "lazy-entry.ts",
+        outDir: lazyDir,
+        emptyOutDir: true,
+        minify: false,
+        rolldownOptions: {
+          output: { entryFileNames: "server.js", chunkFileNames: "chunks/[name]-[hash].js" },
+        },
+      },
+    });
+    ({ loadEcho } = (await import(pathToFileURL(path.join(lazyDir, "server.js")).href)) as {
+      loadEcho: typeof loadEcho;
+    });
+  });
+
+  it("writes the route's core modules next to its own chunk", async () => {
+    expect(existsSync(path.join(lazyDir, "polyroute"))).toBe(false);
+    expect(await readdir(path.join(lazyDir, "chunks", "polyroute"))).toHaveLength(1);
+  });
+
+  it("fails with ROUTE_INSTANTIATION_FAILED while a core module file is missing, then recovers", async () => {
+    const files = path.join(lazyDir, "chunks", "polyroute");
+    const { default: route } = await loadEcho();
+    await rename(files, `${files}-moved`);
+    try {
+      await expect(route.fetch(new Request("http://localhost/"))).rejects.toMatchObject({
+        code: "ROUTE_INSTANTIATION_FAILED",
+        message: expect.stringContaining("Deploy the `polyroute` directory"),
+      });
+    } finally {
+      await rename(`${files}-moved`, files);
+    }
+    expect((await route.fetch(new Request("http://localhost/"))).status).toBe(200);
   });
 });
 
