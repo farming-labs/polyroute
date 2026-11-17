@@ -17,6 +17,7 @@ import {
 import { createWasiHttpHandler } from "./index.js";
 import { createOutboundPolicy, sendOutbound, type OutboundRequest } from "./outbound.js";
 
+const jspi = typeof (WebAssembly as { Suspending?: unknown }).Suspending === "function";
 const text = (value: Uint8Array) => new TextDecoder().decode(value);
 const bytes = (value: string) => new TextEncoder().encode(value);
 
@@ -306,7 +307,9 @@ describe("wasi:http/outgoing-handler", () => {
 });
 
 describe("a route that sends requests", () => {
-  it("cancels the requests it's still waiting on once it has answered", async () => {
+  // Without JSPI, the runtime refuses the route before it can send anything,
+  // which the next test checks.
+  it.runIf(jspi)("cancels the requests it's still waiting on once it has answered", async () => {
     let future: FutureIncomingResponse | undefined;
     const route = createWasiHttpHandler({
       route: "route.rs",
