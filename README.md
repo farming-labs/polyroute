@@ -309,7 +309,7 @@ Apple M1, Node 24.21.0, 10 runs per route alternating between the two builds, me
 
 On real work, the gap goes the other way. Counting primes below 100,000, the Rust route served 439 requests/s, the same algorithm in a plain Node server 245, and `wasmtime serve`, which runs the same component across several threads, 1,506. Those are single 5-second runs with 10 connections.
 
-So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, with machine code compiled at build time, is proposed in [RFC 0001](docs/rfcs/0001-native-runtime.md), along with a change that cuts every route's cold start.
+So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, with machine code compiled at build time, is proposed in [RFC 0001](docs/rfcs/0001-native-runtime.md).
 
 ## Limits
 

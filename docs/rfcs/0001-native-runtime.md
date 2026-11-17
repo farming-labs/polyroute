@@ -99,7 +99,9 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 ## Part 1: write route WebAssembly to files
 
-**Change.** jco's async instantiation asks the runtime for each core module by name through `getCoreModule`. Today the plugin writes every module into the route module as a base64 string (`coreModules` in `transpile.ts` and `plugin.ts`), and `getCoreModule` decodes and compiles it on the route's first request. With this change, the plugin emits each module as a Vite asset, `dist/polyroute/<route-id>/<name>.wasm`, and `getCoreModule` reads that file. Compiling still happens on first use, so a process only reads and compiles the routes it serves.
+**Status: landed in [#16](https://github.com/farming-labs/polyroute/pull/16).** Cold start dropped by 47–57% on every route of the example, from 324 to 139 ms for TypeScript and from 486 to 235 ms for Python, measured with `bench --cold` at a load average of about 20. The first acceptance item below isn't settled. The example imports every route up front, so its server still parses about 2 MB of jco bindings when it starts, and a lazy route table measured inconclusively on the loaded machine.
+
+**Change.** jco's async instantiation asks the runtime for each core module by name through `getCoreModule`. Today the plugin writes every module into the route module as a base64 string (`coreModules` in `transpile.ts` and `plugin.ts`), and `getCoreModule` decodes and compiles it on the route's first request. With this change, the build writes each module to `polyroute/<content-hash>/<name>.wasm` next to the chunk that holds the route module, and `getCoreModule` reads that file. Vite drops emitted assets from server builds, so the files are emitted after Vite's own `generateBundle` hook. Compiling still happens on first use, so a process only reads and compiles the routes it serves.
 
 **Compatibility.**
 
@@ -137,7 +139,7 @@ polyroute({
 
 ### Build
 
-For each route and each target, `vite build` calls `Engine::precompile_component` with a fixed `Config` and writes `dist/polyroute/<route-id>/<target>.cwasm`. The build fails if the addon isn't installed or a target isn't supported. It never falls back to jco on its own.
+For each route and each target, `vite build` calls `Engine::precompile_component` with a fixed `Config` and writes `polyroute/<content-hash>/<target>.cwasm` next to the route's chunk, the same way part 1 places core modules. The build fails if the addon isn't installed or a target isn't supported. It never falls back to jco on its own.
 
 ### Request path
 
@@ -193,7 +195,7 @@ If the prototype misses these, we stop and keep part 1.
 
 ## Rollout
 
-1. Part 1, including `bench --cold` and the README numbers.
+1. Part 1, including `bench --cold` and the README numbers. Done in [#16](https://github.com/farming-labs/polyroute/pull/16).
 2. A part 2 prototype on a branch: Rust only, macOS arm64 and Linux x64, measured against the acceptance list. Stop here if it misses.
 3. Go and Python, Windows, prebuild CI, and docs.
 4. Rename `experimental.runtime` to `runtime`, keeping the old key as a deprecated alias, once it has held up in real apps.
