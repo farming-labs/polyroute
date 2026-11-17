@@ -12,7 +12,7 @@ app/api/
   stats/route.py     def POST(request: Request) -> Response: ...
 ```
 
-The built server is plain JavaScript. The machine that runs it needs Node, nothing else: no Rust, Go, or Python toolchain, no wasmtime, no extra packages.
+The build writes a plain JavaScript server and, next to it, a `polyroute/` folder with each route's WebAssembly. Deploy both. The machine that runs them needs Node, nothing else: no Rust, Go, or Python toolchain, no wasmtime, no extra packages.
 
 > **Status:** early. Not published to npm yet.
 
@@ -232,7 +232,7 @@ polyroute({ instances: "per-request" });
    - Python: `componentize-py`, against the `polyroute:route/route` world in [`wit/`](packages/polyroute/wit).
    - Prebuilt components are read as they are.
 2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. polyroute rewrites the bindings so calls into its synchronous host skip jco's async task bookkeeping ([why that's safe](docs/decisions/0002-skip-sync-task-bookkeeping.md)). The output is cached by content hash.
-3. The bindings and the base64-encoded core modules are bundled into your server build, together with polyroute's runtime.
+3. The bindings are bundled into your server build, together with polyroute's runtime. The core modules are written to a `polyroute/` folder next to the chunk that loads them, so starting the server doesn't parse any route's WebAssembly. In dev, they're inlined instead.
 4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. The first request to a route instantiates its component, and later requests reuse that instance. See [Instances](#instances).
 
 ## What a route can use
@@ -293,6 +293,20 @@ Apple M1, Node 24.21.0, 10 connections, three 4-second rounds per route after a 
 
 Reusing the instance removes the biggest cost, which grew with the component: 254 KiB for Rust, 6.9 MB for Go, and 18.5 MB for Python, an interpreter plus a heap snapshot. A non-TypeScript route still costs more per request than a TypeScript one, about 1.8× for Rust and 4× for Go and Python here. Every call between the route and its host goes through jco's glue. jco runs each call through its async task runtime, even when both sides are synchronous, so polyroute rewrites the bindings to skip that for its synchronous host ([0002](docs/decisions/0002-skip-sync-task-bookkeeping.md)). That halved the Rust route's cost measured in-process, from 45 µs to 24 µs a request. A CPU profile of the rewritten route still puts 41% of its time in jco's bindings and 7% in the route's own WebAssembly. Most of the rest is undici's `Request` and `Response`, polyroute's host, and V8 itself. Over HTTP, Node's server adds the same cost to every route, TypeScript included.
 
+### Cold start
+
+`node scripts/bench.mjs --cold` starts a new server for every sample and times its first response, which is what the first request to a serverless instance pays:
+
+| Route                   | Core modules inlined (before) | Core modules as files |
+| ----------------------- | ----------------------------: | --------------------: |
+| TypeScript              |                        324 ms |                139 ms |
+| Rust (little work)      |                        349 ms |                168 ms |
+| Rust (primes to 10,000) |                        358 ms |                165 ms |
+| Go                      |                        433 ms |                253 ms |
+| Python                  |                        486 ms |                235 ms |
+
+Apple M1, Node 24.21.0, 10 runs per route alternating between the two builds, median shown. Other processes kept the load average around 20 during the run, so the absolute numbers are high. In a quieter run, a 3-line Node `http` server answered its first request in about 50 ms. The server bundle used to carry every route's core modules as base64, 35 MB of a 37.4 MB `server.js`, and every cold start parsed all of it, TypeScript routes included. Now `server.js` is 2.2 MB, and a route reads its own files on its first request. What's left includes about 2 MB of jco bindings, one copy per route, which a server that imports all its routes up front parses when it starts.
+
 On real work, the gap goes the other way. Counting primes below 100,000, the Rust route served 439 requests/s, the same algorithm in a plain Node server 245, and `wasmtime serve`, which runs the same component across several threads, 1,506. Those are single 5-second runs with 10 connections.
 
 So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, with machine code compiled at build time, is proposed in [RFC 0001](docs/rfcs/0001-native-runtime.md), along with a change that cuts every route's cold start.
@@ -303,7 +317,7 @@ So use polyroute when you want to write a route in another language and deploy i
 - Python routes can import the standard library and modules next to the route. Third-party packages are untested; componentize-py picks up the active virtual environment's `site-packages`, so build in a clean one.
 - Request and response bodies are buffered in memory. Streaming isn't supported yet.
 - A route that sleeps blocks the Node event loop while it sleeps.
-- Core modules are inlined as base64. A Python route adds about 24 MB to the server bundle, and a Go route about 9 MB.
+- Core modules deploy as files next to the server: about 19 MB for a Python route, 7 MB for a Go route, and 250 KB for a Rust route. A deploy that copies `server.js` without its `polyroute/` folder fails with `ROUTE_INSTANTIATION_FAILED` on each route's first request.
 - Each route bundles its own copy of jco's glue code, about 400 KB before compression.
 - The first build of each language is slow: Rust compiles wstd, and componentize-go downloads itself on first use. Later builds are incremental.
 - Tested on macOS arm64 with Node 24. Windows and Linux run in CI but haven't been verified by hand. Bun, Deno, and Cloudflare Workers are untested; Workers can't compile Wasm from bytes at runtime, so routes won't load there as-is.
