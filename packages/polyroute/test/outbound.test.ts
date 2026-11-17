@@ -10,10 +10,12 @@ import type { WasiHttpRoute } from "../src/runtime/index.js";
 import { buildServerEntry, fixturesDir } from "./helpers.js";
 
 const jspi = typeof (WebAssembly as { Suspending?: unknown }).Suspending === "function";
+const languages = ["rust", "go", "python"] as const;
 
 interface OutboundEntry {
   rust: WasiHttpRoute;
   go: WasiHttpRoute;
+  python: WasiHttpRoute;
 }
 
 let outDir: string;
@@ -74,13 +76,14 @@ describe("production build of routes that send requests", () => {
     const suspending = code.match(/\b_trampoline\d+\.manuallyAsync = !0;/g) ?? [];
     const direct =
       code.match(/\$checkMayLeave(?:\$\d+)?\(_jcoTaskCompatImportContext\.mayLeave, \d+\);/g) ?? [];
-    // `poll` and `pollable.block`, in the Rust and the Go route.
-    expect(suspending.length).toBe(4);
+    // `poll` and `pollable.block` in each route. The Python route lowers `poll`
+    // for two of its core modules, so it has three.
+    expect(suspending.length).toBe(7);
     expect(direct.length).toBe(trampolines.length - suspending.length);
   });
 });
 
-describe.runIf(jspi).each(["rust", "go"] as const)("%s route that sends requests", (language) => {
+describe.runIf(jspi).each(languages)("%s route that sends requests", (language) => {
   const call = (headers: Record<string, string>, init: RequestInit = {}) =>
     routes[language].fetch(new Request("http://localhost/", { ...init, headers }));
 
@@ -107,7 +110,11 @@ describe.runIf(jspi).each(["rust", "go"] as const)("%s route that sends requests
     expect(response.status).toBe(502);
     // Go's wasihttp prints the error code's case number: 15 is `HTTP-request-denied`.
     expect(await response.text()).toMatch(
-      language === "rust" ? /HttpRequestDenied/ : /incoming-response: \{15 <nil>\}/,
+      {
+        rust: /HttpRequestDenied/,
+        go: /incoming-response: \{15 <nil>\}/,
+        python: /^ErrorCode_HttpRequestDenied\(\)$/,
+      }[language],
     );
     expect(received.length).toBe(before);
   });
@@ -122,6 +129,21 @@ describe.runIf(jspi).each(["rust", "go"] as const)("%s route that sends requests
     for (const response of responses) {
       expect(await response.text()).toBe(`GET /gather?n=3 x-sent-by=${language} body=`);
     }
+  });
+});
+
+describe.runIf(jspi)("python route that sends requests", () => {
+  it("sends several at once from one handler with asyncio.gather", async () => {
+    // The upstream answers only once all three are waiting, so they can't be
+    // sent one after another.
+    const response = await routes.python.fetch(
+      new Request("http://localhost/", {
+        headers: { "x-upstream": `${base}/gather?n=3`, "x-fan-out": "3" },
+      }),
+    );
+    expect(await response.text()).toBe(
+      Array.from({ length: 3 }, () => "GET /gather?n=3 x-sent-by=python body=").join("\n"),
+    );
   });
 });
 
