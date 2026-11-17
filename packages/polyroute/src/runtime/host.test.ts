@@ -48,15 +48,6 @@ describe("createImports", () => {
       thrown(() => imports["wasi:sockets/ip-name-lookup"]!.resolveAddresses!(null, "example.com")),
     ).toBe("access-denied");
   });
-
-  it("refuses to construct an outbound request", () => {
-    const sink = createLineSink(() => {});
-    const types = createImports({ stdout: sink, stderr: sink })["wasi:http/types"] as Record<
-      string,
-      new () => unknown
-    >;
-    expect(() => new types.OutgoingRequest!()).toThrow(/doesn't support outbound HTTP/);
-  });
 });
 
 describe("Fields", () => {

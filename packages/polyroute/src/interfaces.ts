@@ -2,7 +2,8 @@
  * Every WASI interface the embedded runtime provides, without versions.
  * A route may import any of these at `0.2.x`; anything else fails the build.
  * The filesystem and sockets are linked but deny everything (see
- * `runtime/denied.ts`).
+ * `runtime/denied.ts`). `wasi:http/outgoing-handler` sends requests only to
+ * hosts the app allows (see `runtime/outbound.ts`).
  */
 export const SUPPORTED_INTERFACES = [
   "wasi:cli/environment",
@@ -24,6 +25,7 @@ export const SUPPORTED_INTERFACES = [
   "wasi:random/insecure",
   "wasi:random/insecure-seed",
   "wasi:http/types",
+  "wasi:http/outgoing-handler",
   "wasi:filesystem/types",
   "wasi:filesystem/preopens",
   "wasi:sockets/network",
@@ -36,6 +38,7 @@ export const SUPPORTED_INTERFACES = [
 ] as const;
 
 export const HTTP_HANDLER_INTERFACE = "wasi:http/incoming-handler";
+export const OUTGOING_HANDLER_INTERFACE = "wasi:http/outgoing-handler";
 
 export interface InterfaceName {
   name: string;

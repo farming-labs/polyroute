@@ -20,7 +20,7 @@ The build writes a plain JavaScript server and, next to it, a `polyroute/` folde
 
 - **It doesn't make light routes faster than TypeScript.** Routes run as WebAssembly inside V8, and every call between a route and its host goes through jco's JavaScript glue. A Rust route that does almost no work costs about 1.8× a TypeScript one per request, and Go and Python about 4×. Routes that do real work can come out ahead. See [Performance](#performance).
 - **It isn't a framework.** It turns a route file into a fetch handler module. Routing, middleware, and serving belong to your framework or server.
-- **Routes can't make outbound HTTP requests yet.** The build fails if a route needs them. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [What a route can use](#what-a-route-can-use).
+- **Routes reach the network only through HTTP, and only to hosts you allow.** A route that sends requests fails to build until you list the hosts it may call. The filesystem and sockets are linked so that language runtimes start, but there's nothing behind them. See [Outbound requests](#outbound-requests) and [What a route can use](#what-a-route-can-use).
 
 ## Quick start
 
@@ -203,12 +203,12 @@ Every method reaches the route, and the route decides what to do with it.
 
 ## Instances
 
-Each route keeps one instance of its component and hands it every request, one at a time, like a long-running server process:
+Each route keeps one instance of its component and hands it every request, one at a time, like a long-running server process. A route that [sends requests](#outbound-requests) can have several requests waiting at once, so it gets up to 32 instances, one per request in flight:
 
 - **Global state persists between requests:** a `static` in Rust, a package-level variable in Go, a module global in Python. Use it for caches and lookup tables, and don't leave one request's data in it for the next.
 - **A trap throws the instance away.** After a panic or an uncaught exception, the next request starts a new instance, so a trap can't affect later requests.
 - **Output belongs to its request.** What a route writes to stdout and stderr goes to the console. The stderr in a `ROUTE_TRAPPED` error is only from the request that trapped.
-- **The instance's memory stays allocated** while the process runs, once per route.
+- **An instance's memory stays allocated** while the process runs: once per route, or once per instance a route that sends requests has started.
 - **A Go instance is replaced after 1,000 requests.** Go's WASI bindings (`go.bytecodealliance.org/pkg` v0.4.1) pin every buffer the host writes into the guest and never release it, so a Go instance's memory grows with every request. A package-level variable in a Go route lasts at most 1,000 requests.
 
 For strict isolation, give every request a fresh instance instead:
@@ -224,6 +224,66 @@ polyroute({ instances: "per-request" });
 
 [docs/decisions/0001-reuse-route-instances.md](docs/decisions/0001-reuse-route-instances.md) explains the choice.
 
+## Outbound requests
+
+A route can call other services with its language's own HTTP client. Allow the hosts it may call:
+
+```ts
+polyroute({ outbound: { allow: ["api.github.com", "*.example.com", "localhost:8787"] } });
+```
+
+| Entry              | Allows                                       |
+| ------------------ | -------------------------------------------- |
+| `"api.github.com"` | That host, on any port                       |
+| `"localhost:8787"` | That host, on that port only                 |
+| `"*.example.com"`  | Its subdomains, but not `example.com` itself |
+| `"*"`              | Any host                                     |
+
+Nothing is allowed by default. A route that sends requests fails to build with `OUTBOUND_NOT_ALLOWED` until `outbound` is set, and a request to a host that isn't listed fails with the `wasi:http` error `HTTP-request-denied`. The route gets that error from its client, as it would a refused connection, and can answer however it likes.
+
+| Language         | Client                                                                |
+| ---------------- | --------------------------------------------------------------------- |
+| Rust             | `wstd::http::Client`                                                  |
+| Go               | `net/http`, with `wasihttp.DefaultClient` or a `wasihttp.Transport`   |
+| Prebuilt `.wasm` | Anything built on `wasi:http/outgoing-handler@0.2`                    |
+| Python           | Not yet: `urllib` and `requests` open sockets, which polyroute denies |
+
+```rust
+// app/api/user/route.rs
+use wstd::http::body::IncomingBody;
+use wstd::http::server::{Finished, Responder};
+use wstd::http::{Client, IntoBody, Request, Response, StatusCode};
+
+#[wstd::http_server]
+async fn main(_request: Request<IncomingBody>, responder: Responder) -> Finished {
+    let upstream = Request::get("https://api.github.com/users/octocat")
+        .header("user-agent", "polyroute")
+        .body(wstd::io::empty())
+        .unwrap();
+    let response = match Client::new().send(upstream).await {
+        Ok(mut user) => {
+            let body = user.body_mut().bytes().await.unwrap_or_default();
+            Response::new(body.into_body())
+        }
+        Err(error) => Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(format!("{error:?}").into_body())
+            .unwrap(),
+    };
+    responder.respond(response).await
+}
+```
+
+While a route waits for a response, the rest of the server keeps running. polyroute transpiles a route that imports `wasi:http/outgoing-handler` with [JSPI](https://v8.dev/blog/jspi), which lets V8 suspend the route's WebAssembly while JavaScript awaits a `fetch`. Its timers suspend it the same way. Routes that don't send requests are transpiled and run exactly as before. [docs/decisions/0003-outbound-http-with-jspi.md](docs/decisions/0003-outbound-http-with-jspi.md) explains the design.
+
+- **It needs Node 24 or later.** Node 22 has no JSPI, so there a route that sends requests fails with `UNSUPPORTED_RUNTIME`, and every other route keeps working.
+- **It costs more than `fetch` from TypeScript.** Over HTTP (`pnpm bench`), the example's relay route, a Rust route that sends one request to the TypeScript route on the same server, served 629 requests/s, against 11,525 for the TypeScript route and 7,188 for a Rust route that sends none. In-process, a Rust route that forwards a request used 1,058 µs of CPU per request and a Go route 2,307 µs, against 164 µs for a TypeScript handler calling `fetch` (median of 30 interleaved rounds). Suspending the route costs under a microsecond. The rest is the route's own work: more than 45 host calls per forwarded request, each through jco's glue. Both runs were on an Apple M1 busy with other work, so read the numbers as rough.
+- **The route pays for JSPI on every request**, including ones that send nothing: a minimal Rust route took 116 µs a request in-process transpiled with JSPI, against 47 µs without.
+- **Bodies are buffered.** The request is sent once the route has written all of its body, and the route sees the response once all of it has arrived.
+- **Compression is undone for the route.** polyroute asks for an uncompressed response unless the route sets `accept-encoding`. When `fetch` decodes a compressed response anyway, polyroute drops `content-encoding` and `content-length`, which describe the compressed bytes.
+- **Redirects aren't followed for the route.** A client that follows them, such as Go's `http.Client`, sends a request per hop, and each hop is checked against `allow`.
+- **Timeouts.** `connect-timeout` and `first-byte-timeout` from `request-options` together limit the wait for the response headers, and `between-bytes-timeout` limits each wait for more of the body. Requests still running when the route's handler returns are cancelled.
+
 ## How it works
 
 1. The language's toolchain compiles the route to a WebAssembly component:
@@ -231,26 +291,27 @@ polyroute({ instances: "per-request" });
    - Go: `go tool componentize-go build`.
    - Python: `componentize-py`, against the `polyroute:route/route` world in [`wit/`](packages/polyroute/wit).
    - Prebuilt components are read as they are.
-2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. polyroute rewrites the bindings so calls into its synchronous host skip jco's async task bookkeeping ([why that's safe](docs/decisions/0002-skip-sync-task-bookkeeping.md)). The output is cached by content hash.
+2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. polyroute rewrites the bindings so calls into its synchronous host skip jco's async task bookkeeping ([why that's safe](docs/decisions/0002-skip-sync-task-bookkeeping.md)). A route that sends requests is transpiled with JSPI instead, and the rewrite doesn't apply to it yet (see [Outbound requests](#outbound-requests)). The output is cached by content hash.
 3. The bindings are bundled into your server build, together with polyroute's runtime. The core modules are written to a `polyroute/` folder next to the chunk that loads them, so starting the server doesn't parse any route's WebAssembly. In dev, they're inlined instead.
 4. At runtime, polyroute hosts the component in process with a small in-memory implementation of the WASI 0.2 interfaces an HTTP handler uses. The first request to a route instantiates its component, and later requests reuse that instance. See [Instances](#instances).
 
 ## What a route can use
 
-| Available                                                             | Not yet                                                 |
-| --------------------------------------------------------------------- | ------------------------------------------------------- |
-| Request method, path, query, headers, and body                        | Outbound HTTP (`wasi:http/outgoing-handler`)            |
-| Responses with any status (200 to 599), headers, and body             | Files: there are no preopened directories               |
-| `stdout` and `stderr`, forwarded to `console.log` and `console.error` | Sockets: every call returns `access-denied`             |
-| Clocks and timers                                                     | Environment variables (routes see an empty environment) |
-| Random numbers                                                        | Response trailers                                       |
+| Available                                                                      | Not yet                                                 |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Request method, path, query, headers, and body                                 | Files: there are no preopened directories               |
+| Responses with any status (200 to 599), headers, and body                      | Sockets: every call returns `access-denied`             |
+| `stdout` and `stderr`, forwarded to `console.log` and `console.error`          | Environment variables (routes see an empty environment) |
+| Clocks and timers                                                              | Request and response trailers                           |
+| Random numbers                                                                 |                                                         |
+| HTTP requests to hosts you allow (see [Outbound requests](#outbound-requests)) |                                                         |
 
 Language runtimes such as CPython and Go's `syscall` package import the filesystem and sockets at startup, whether or not the route uses them. polyroute links those interfaces with nothing behind them, so the route starts but can't open a file or a connection.
 
 The build checks every other interface a route imports. If one isn't available, the build fails and names it:
 
 ```
-`app/api/fetch/route.rs` imports `wasi:http/outgoing-handler`, which polyroute's
+`app/api/cache/route.rs` imports `wasi:keyvalue/store`, which polyroute's
 embedded runtime doesn't provide. ...
 ```
 
@@ -268,8 +329,10 @@ Every error polyroute throws is a `PolyrouteError` with a stable `code`:
 | `BUILD_FAILED`               | The route doesn't compile; the message includes the toolchain's output  |
 | `CLIENT_IMPORT`              | A route was imported from browser code                                  |
 | `UNSUPPORTED_IMPORT`         | The route needs an interface the runtime doesn't provide                |
+| `OUTBOUND_NOT_ALLOWED`       | The route sends HTTP requests, but `outbound` isn't set                 |
 | `MISSING_HANDLER`            | The component doesn't export `wasi:http/incoming-handler`               |
 | `ROUTE_INSTANTIATION_FAILED` | The compiled route couldn't be instantiated                             |
+| `UNSUPPORTED_RUNTIME`        | The route sends HTTP requests, and the runtime has no JSPI (Node < 24)  |
 | `ROUTE_TRAPPED`              | The route panicked, raised, or trapped; the message includes its stderr |
 | `ROUTE_NO_RESPONSE`          | The route returned without responding                                   |
 | `ROUTE_ERROR`                | The route responded with a `wasi:http` error code                       |
@@ -316,7 +379,7 @@ So use polyroute when you want to write a route in another language and deploy i
 - Rust routes build with wstd 0.5, Go routes with componentize-go 0.5.3 and go-wasi 0.1.2, and Python routes with componentize-py 0.25.
 - Python routes can import the standard library and modules next to the route. Third-party packages are untested; componentize-py picks up the active virtual environment's `site-packages`, so build in a clean one.
 - Request and response bodies are buffered in memory. Streaming isn't supported yet.
-- A route that sleeps blocks the Node event loop while it sleeps.
+- A route that sleeps blocks the Node event loop while it sleeps, unless it [sends requests](#outbound-requests), which makes its timers suspend it instead.
 - Core modules deploy as files next to the server: about 19 MB for a Python route, 7 MB for a Go route, and 250 KB for a Rust route. A deploy that copies `server.js` without its `polyroute/` folder fails with `ROUTE_INSTANTIATION_FAILED` on each route's first request.
 - Each route bundles its own copy of jco's glue code, about 400 KB before compression.
 - The first build of each language is slow: Rust compiles wstd, and componentize-go downloads itself on first use. Later builds are incremental.

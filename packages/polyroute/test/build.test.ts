@@ -466,10 +466,29 @@ describe("Go routes", () => {
 });
 
 describe("build-time checks", () => {
-  it("rejects a route that needs outbound HTTP, naming the missing interface", async () => {
-    await expect(
-      buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound")),
-    ).rejects.toThrow(/imports `wasi:http\/outgoing-handler`/);
+  it("rejects a route that sends HTTP requests unless `outbound` lists hosts", async () => {
+    // Rolldown reports the Rust and the Go route's errors together.
+    const failure = buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound"));
+    await expect(failure).rejects.toThrow(
+      'PolyrouteError: `outbound/route.rs` sends HTTP requests (it imports `wasi:http/outgoing-handler`), and polyroute allows none by default. List the hosts routes may call, for example `polyroute({ outbound: { allow: ["api.example.com"] } })`.',
+    );
+    await expect(failure).rejects.toThrow(
+      "PolyrouteError: `go/outbound/route.go` sends HTTP requests",
+    );
+  });
+
+  it("rejects every `outbound.allow` entry that isn't a host, at once", () => {
+    expect(() =>
+      polyroute({
+        outbound: { allow: ["api.example.com", "https://example.com", "example.com/path", ""] },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "INVALID_OPTIONS",
+        message:
+          'Every `outbound.allow` entry must be a host such as `api.example.com`, `localhost:8787`, `*.example.com`, or `*`, without a scheme or path. These aren\'t: "https://example.com", "example.com/path", "".',
+      }),
+    );
   });
 
   it("rejects an `instances` value it doesn't know, naming the accepted ones", () => {
