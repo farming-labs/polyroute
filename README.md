@@ -181,7 +181,7 @@ The `polyroute` module comes with the package. It provides:
 - `Request`, with `method`, `url`, `path`, `query` (a dict of the first value per key), `headers` (a dict with lowercase names), `body` (bytes), `text()`, and `json()`.
 - `Response(body=None, status=200, headers=None)`, where `body` may be `str`, `bytes`, or `None`. There's also `Response.json(data, status=200, headers=None)`.
 
-A method the route doesn't define gets `405` with an `allow` header, and `HEAD` falls back to `GET`.
+A method the route doesn't define gets `405` with an `allow` header, and `HEAD` falls back to `GET`. A handler can be `async def`, to [send requests](#outbound-requests) with `polyroute_fetch`.
 
 Modules next to the route can be imported, as can the standard library. componentize-py imports the route at build time and snapshots it, so top-level code runs once, during the build. CPython 3.14 runs inside the component, whatever Python installed componentize-py.
 
@@ -241,12 +241,12 @@ polyroute({ outbound: { allow: ["api.github.com", "*.example.com", "localhost:87
 
 Nothing is allowed by default. A route that sends requests fails to build with `OUTBOUND_NOT_ALLOWED` until `outbound` is set, and a request to a host that isn't listed fails with the `wasi:http` error `HTTP-request-denied`. The route gets that error from its client, as it would a refused connection, and can answer however it likes.
 
-| Language         | Client                                                                |
-| ---------------- | --------------------------------------------------------------------- |
-| Rust             | `wstd::http::Client`                                                  |
-| Go               | `net/http`, with `wasihttp.DefaultClient` or a `wasihttp.Transport`   |
-| Prebuilt `.wasm` | Anything built on `wasi:http/outgoing-handler@0.2`                    |
-| Python           | Not yet: `urllib` and `requests` open sockets, which polyroute denies |
+| Language         | Client                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| Rust             | `wstd::http::Client`                                                                        |
+| Go               | `net/http`, with `wasihttp.DefaultClient` or a `wasihttp.Transport`                         |
+| Python           | `fetch` from `polyroute_fetch`, in an `async def` handler, or componentize-py's `poll_loop` |
+| Prebuilt `.wasm` | Anything built on `wasi:http/outgoing-handler@0.2`                                          |
 
 ```rust
 // app/api/user/route.rs
@@ -274,6 +274,27 @@ async fn main(_request: Request<IncomingBody>, responder: Responder) -> Finished
 }
 ```
 
+In Python, `fetch(url, method="GET", headers=None, body=None)` returns a `Response` with `status`, `headers` (a list of name and value pairs), and `body` (bytes, read in full). A failed request raises `componentize_py_types.Err`, whose `value` is the `wasi:http` error code, such as `ErrorCode_HttpRequestDenied()`. `asyncio.gather` sends several requests at once.
+
+```python
+# app/api/user/route.py
+from componentize_py_types import Err
+from polyroute import Request, Response
+from polyroute_fetch import fetch
+
+
+async def GET(request: Request) -> Response:
+    try:
+        user = await fetch(
+            "https://api.github.com/users/octocat", headers={"user-agent": "polyroute"}
+        )
+    except Err as error:
+        return Response(repr(error.value), status=502)
+    return Response(user.body, status=user.status)
+```
+
+`polyroute_fetch` is built on componentize-py's bundled `poll_loop`, and polyroute runs async handlers on its event loop. componentize-py puts every interface in the world into the component, whether the code uses it or not, so polyroute builds a Python route with `wasi:http/outgoing-handler` only when one of its files imports `polyroute_fetch` or `poll_loop`. `urllib` and `requests` open sockets, which polyroute denies.
+
 While a route waits for a response, the rest of the server keeps running. polyroute transpiles a route that imports `wasi:http/outgoing-handler` with [JSPI](https://v8.dev/blog/jspi), which lets V8 suspend the route's WebAssembly while JavaScript awaits a `fetch`. Its timers suspend it the same way. Routes that don't send requests are transpiled and run exactly as before. [docs/decisions/0003-outbound-http-with-jspi.md](docs/decisions/0003-outbound-http-with-jspi.md) explains the design.
 
 - **It needs Node 24 or later.** Node 22 has no JSPI, so there a route that sends requests fails with `UNSUPPORTED_RUNTIME`, and every other route keeps working.
@@ -289,7 +310,7 @@ While a route waits for a response, the rest of the server keeps running. polyro
 1. The language's toolchain compiles the route to a WebAssembly component:
    - Rust: `cargo build --release --target wasm32-wasip2`. All Rust routes share one target directory under Vite's cache directory (`node_modules/.vite/polyroute`), so dependencies compile once.
    - Go: `go tool componentize-go build`.
-   - Python: `componentize-py`, against the `polyroute:route/route` world in [`wit/`](packages/polyroute/wit).
+   - Python: `componentize-py`, against the `polyroute:route/route` world in [`wit/`](packages/polyroute/wit), or `polyroute:route/outbound-route` for a route that [sends requests](#outbound-requests).
    - Prebuilt components are read as they are.
 2. [jco](https://github.com/bytecodealliance/jco) transpiles the component into JavaScript bindings and core Wasm modules. polyroute rewrites the bindings so calls into its synchronous host skip jco's async task bookkeeping ([why that's safe](docs/decisions/0002-skip-sync-task-bookkeeping.md)). A route that sends requests is transpiled with JSPI, and the rewrite skips the two imports that can suspend (see [Outbound requests](#outbound-requests)). The output is cached by content hash.
 3. The bindings are bundled into your server build, together with polyroute's runtime. The core modules are written to a `polyroute/` folder next to the chunk that loads them, so starting the server doesn't parse any route's WebAssembly. In dev, they're inlined instead.

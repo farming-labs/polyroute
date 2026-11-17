@@ -7,6 +7,7 @@ import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
 import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
+import { python } from "../src/languages/python.js";
 import { buildRustRoute } from "../src/languages/rust.js";
 import { IncomingRequest } from "../src/runtime/host.js";
 import { createWasiHttpHandler, type WasiHttpRoute } from "../src/runtime/index.js";
@@ -467,7 +468,7 @@ describe("Go routes", () => {
 
 describe("build-time checks", () => {
   it("rejects a route that sends HTTP requests unless `outbound` lists hosts", async () => {
-    // Rolldown reports the Rust and the Go route's errors together.
+    // Rolldown reports the Rust, Go, and Python routes' errors together.
     const failure = buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound"));
     await expect(failure).rejects.toThrow(
       'PolyrouteError: `outbound/route.rs` sends HTTP requests (it imports `wasi:http/outgoing-handler`), and polyroute allows none by default. List the hosts routes may call, for example `polyroute({ outbound: { allow: ["api.example.com"] } })`.',
@@ -475,6 +476,25 @@ describe("build-time checks", () => {
     await expect(failure).rejects.toThrow(
       "PolyrouteError: `go/outbound/route.go` sends HTTP requests",
     );
+    await expect(failure).rejects.toThrow(
+      "PolyrouteError: `python/outbound/route.py` sends HTTP requests",
+    );
+  });
+
+  it("rejects an async Python handler in a route that can't send requests", async () => {
+    const label = "python/async/route.py";
+    await expect(
+      python.build({
+        routeFile: path.join(fixturesDir, label),
+        label,
+        cacheDir: path.join(cacheDir, "polyroute"),
+      }),
+    ).rejects.toMatchObject({
+      code: "BUILD_FAILED",
+      message: expect.stringContaining(
+        "route.py has an async handler, which polyroute runs on componentize-py's poll_loop.",
+      ),
+    });
   });
 
   it("rejects every `outbound.allow` entry that isn't a host, at once", () => {

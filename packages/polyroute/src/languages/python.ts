@@ -6,15 +6,22 @@ import { PolyrouteError } from "../errors.js";
 import { createQueue, runTool } from "./process.js";
 import type { Language, RouteBuildInput, RouteBuildResult } from "./types.js";
 
-/** polyroute's Python module (`polyroute.py`), shipped in the package. */
+/** polyroute's Python modules (`polyroute.py` and `polyroute_fetch.py`), shipped in the package. */
 export const PYTHON_DIR = fileURLToPath(new URL("../../python/", import.meta.url));
-/** The WIT world every Python route is built against, shipped in the package. */
+/** The WIT worlds Python routes are built against, shipped in the package. */
 export const WIT_DIR = fileURLToPath(new URL("../../wit/", import.meta.url));
 export const ROUTE_WORLD = "polyroute:route/route";
+/** `ROUTE_WORLD` plus `wasi:http/outgoing-handler`, for routes that send requests. */
+export const OUTBOUND_ROUTE_WORLD = "polyroute:route/outbound-route";
 
 const APP_MODULE = "polyroute_app";
 const MODULE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IGNORED_DIRS = new Set(["__pycache__", "node_modules", "site-packages"]);
+// componentize-py imports every interface in the world, whether or not the code
+// uses it, so a route is built with `wasi:http/outgoing-handler` only when one
+// of its files imports a module that sends requests or uses the binding itself.
+const SENDS_REQUESTS =
+  /^[ \t]*(?:from|import)[ \t]+(?:polyroute_fetch|poll_loop)\b|\boutgoing_handler\b/m;
 
 const enqueue = createQueue();
 
@@ -55,6 +62,8 @@ async function buildPythonRoute({
     ].join("\n"),
   );
 
+  const sources = await listPythonSources(routeDir);
+  const world = (await anySendsRequests(sources)) ? OUTBOUND_ROUTE_WORLD : ROUTE_WORLD;
   const output = path.join(workDir, "route.wasm");
   const result = await runTool(
     "componentize-py",
@@ -63,7 +72,7 @@ async function buildPythonRoute({
       "-d",
       WIT_DIR,
       "-w",
-      ROUTE_WORLD,
+      world,
       "componentize",
       APP_MODULE,
       "-p",
@@ -87,7 +96,19 @@ async function buildPythonRoute({
     );
   }
 
-  return { wasm: await readFile(output), sources: await listPythonSources(routeDir) };
+  return { wasm: await readFile(output), sources };
+}
+
+/** Whether Python source imports `polyroute_fetch` or `poll_loop`, or uses `outgoing_handler`. */
+export function sendsRequests(source: string): boolean {
+  return SENDS_REQUESTS.test(source);
+}
+
+async function anySendsRequests(sources: string[]): Promise<boolean> {
+  for (const source of sources) {
+    if (sendsRequests(await readFile(source, "utf8"))) return true;
+  }
+  return false;
 }
 
 async function writeIfChanged(file: string, content: string): Promise<void> {
