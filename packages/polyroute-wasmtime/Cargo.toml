@@ -1,0 +1,36 @@
+[package]
+name = "polyroute-wasmtime"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Runs polyroute's WebAssembly routes in wasmtime from Node."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bytes = "1"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+napi = "3.16"
+napi-derive = "3.7"
+wasmtime = { version = "=50.0.2", default-features = false, features = [
+  "component-model",
+  "cranelift",
+  "parallel-compilation",
+  "runtime",
+  "std",
+] }
+wasmtime-wasi = { version = "=50.0.2", default-features = false, features = ["p2"] }
+wasmtime-wasi-http = { version = "=50.0.2", default-features = false, features = ["p2"] }
+tokio = { version = "1", default-features = false }
+
+[build-dependencies]
+napi-build = "2.6"
+
+[profile.release]
+debug = false
+strip = true
+incremental = false

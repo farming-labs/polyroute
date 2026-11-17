@@ -305,6 +305,38 @@ While a route waits for a response, the rest of the server keeps running. polyro
 - **Redirects aren't followed for the route.** A client that follows them, such as Go's `http.Client`, sends a request per hop, and each hop is checked against `allow`.
 - **Timeouts.** `connect-timeout` and `first-byte-timeout` from `request-options` together limit the wait for the response headers, and `between-bytes-timeout` limits each wait for more of the body. Requests still running when the route's handler returns are cancelled.
 
+## The wasmtime runtime (experimental)
+
+By default, jco transpiles each route to JavaScript, and the server runs its WebAssembly in V8. With `experimental.runtime: "wasmtime"`, `vite build` compiles each route to machine code for the building machine instead. The server then runs that code in [wasmtime](https://wasmtime.dev) through a Node-API addon:
+
+```ts
+polyroute({ experimental: { runtime: "wasmtime" } });
+```
+
+It's a prototype from [RFC 0001](https://github.com/farming-labs/polyroute/pull/15), part 2, and it may change or go away in any release.
+
+- **It needs the addon.** Add `@farming-labs/polyroute-wasmtime` to the app. It isn't published yet, so build it in this repository with `pnpm --filter @farming-labs/polyroute-wasmtime build`, which needs Rust.
+- **It builds for this machine only.** The build writes each route's machine code to `polyroute/<hash>/<target>.cwasm`, and copies the addon to `polyroute/wasmtime/<target>.node`, next to the chunk that loads them. Deploy that folder to a server with the same OS and architecture. A server that can't load either file fails with `RUNTIME_UNAVAILABLE` on the route's first request. It never falls back to jco.
+- **Dev still uses jco.** Only `vite build` uses wasmtime.
+- **Routes that send requests aren't supported yet.** The build fails for a route that imports `wasi:http/outgoing-handler`, with `UNSUPPORTED_RUNTIME`.
+- **Everything else matches the default runtime.** [Instances](#instances) work the same way, including `"per-request"` and Go's limit of 1,000 requests per instance, and so does the [list of what a route can use](#what-a-route-can-use). Errors use the same codes, and a `ROUTE_TRAPPED` error carries the trapped request's stderr. Each request is one synchronous call into the addon, as it's one call into jco's bindings today.
+
+Measured on the example app without its relay route, which this runtime can't build yet. Apple M1, Node 24.21.0, both builds alternating, median shown:
+
+| Route                   | Cold start, jco | Cold start, wasmtime | Requests/s at 1 connection, jco → wasmtime | At 10 connections |
+| ----------------------- | --------------: | -------------------: | -----------------------------------------: | ----------------: |
+| TypeScript              |          133 ms |               114 ms |                            10,838 → 10,703 |   20,876 → 21,343 |
+| Rust (little work)      |          152 ms |               112 ms |                              7,593 → 8,475 |   15,503 → 13,754 |
+| Rust (primes to 10,000) |          159 ms |               116 ms |                              4,611 → 4,036 |     6,009 → 4,880 |
+| Go                      |          223 ms |               116 ms |                              3,988 → 5,006 |     5,474 → 6,537 |
+| Python                  |          237 ms |               123 ms |                              3,684 → 3,981 |     4,383 → 4,239 |
+
+Cold start is 10 runs per route, and throughput is five 4-second rounds after a 2-second warmup. The load average from other processes was 4 to 27 during the runs, and single rounds varied by up to 3.5×, so read the throughput columns as rough. The bundle no longer parses jco's bindings, so `server.js` went from 2.2 MB to 12 KB, and every route answered its first request within 9 ms of the TypeScript route.
+
+Throughput is mixed. In process, a request cost less CPU in wasmtime for every language: 51 µs against 68 µs for a Rust echo route, 173 µs against 288 µs for Go, and 197 µs against 228 µs for Python (median of 20 interleaved rounds). Over HTTP, Node's server costs every route the same, so the gap is smaller and within the noise for the light routes. The primes route is slower in wasmtime: on a tight loop like that one, V8's optimizing compiler makes faster code than Cranelift.
+
+The deploy is bigger: the example's `dist` is 59 MB with wasmtime against 27 MB with jco. Python's machine code is 32 MB, Go's 14 MB, each Rust route's 0.7 MB, and the addon 14 MB.
+
 ## How it works
 
 1. The language's toolchain compiles the route to a WebAssembly component:
@@ -354,6 +386,7 @@ Every error polyroute throws is a `PolyrouteError` with a stable `code`:
 | `MISSING_HANDLER`            | The component doesn't export `wasi:http/incoming-handler`               |
 | `ROUTE_INSTANTIATION_FAILED` | The compiled route couldn't be instantiated                             |
 | `UNSUPPORTED_RUNTIME`        | The route sends HTTP requests, and the runtime has no JSPI (Node < 24)  |
+| `RUNTIME_UNAVAILABLE`        | The wasmtime runtime can't load its addon or a route's machine code     |
 | `ROUTE_TRAPPED`              | The route panicked, raised, or trapped; the message includes its stderr |
 | `ROUTE_NO_RESPONSE`          | The route returned without responding                                   |
 | `ROUTE_ERROR`                | The route responded with a `wasi:http` error code                       |
@@ -393,7 +426,7 @@ Apple M1, Node 24.21.0, 10 runs per route alternating between the two builds, me
 
 On real work, the gap goes the other way. Counting primes below 100,000, the Rust route served 439 requests/s, the same algorithm in a plain Node server 245, and `wasmtime serve`, which runs the same component across several threads, 1,506. Those are single 5-second runs with 10 connections.
 
-So use polyroute when you want to write a route in another language and deploy it wherever Node runs. Running components under wasmtime, where cold starts and multicore throughput are strong, is a planned addition.
+So use polyroute when you want to write a route in another language and deploy it wherever Node runs. [The wasmtime runtime](#the-wasmtime-runtime-experimental) is an experimental way to start routes faster.
 
 ## Limits
 
@@ -403,6 +436,7 @@ So use polyroute when you want to write a route in another language and deploy i
 - A route that sleeps blocks the Node event loop while it sleeps, unless it [sends requests](#outbound-requests), which makes its timers suspend it instead.
 - Core modules deploy as files next to the server: about 19 MB for a Python route, 7 MB for a Go route, and 250 KB for a Rust route. A deploy that copies `server.js` without its `polyroute/` folder fails with `ROUTE_INSTANTIATION_FAILED` on each route's first request.
 - Each route bundles its own copy of jco's glue code, about 400 KB before compression.
+- `experimental.runtime: "wasmtime"` builds for the building machine only, doesn't support routes that send requests, and has only been measured on macOS arm64.
 - The first build of each language is slow: Rust compiles wstd, and componentize-go downloads itself on first use. Later builds are incremental.
 - Tested on macOS arm64 with Node 24. Windows and Linux run in CI but haven't been verified by hand. Bun, Deno, and Cloudflare Workers are untested; Workers can't compile Wasm from bytes at runtime, so routes won't load there as-is.
 
@@ -412,6 +446,7 @@ The tests build real routes, so they need every toolchain from the [quick start]
 
 ```bash
 pnpm install
+pnpm --filter @farming-labs/polyroute-wasmtime build   # the addon the wasmtime tests load
 pnpm test           # unit, production build, and dev server tests
 pnpm smoke          # build the example and check every route over HTTP
 pnpm smoke:packed   # the same, installed from a packed tarball outside the workspace

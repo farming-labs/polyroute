@@ -1,0 +1,32 @@
+{
+  "name": "@farming-labs/polyroute-wasmtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs polyroute's WebAssembly routes in wasmtime from Node, for `experimental.runtime: \"wasmtime\"`.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/farming-labs/polyroute.git",
+    "directory": "packages/polyroute-wasmtime"
+  },
+  "files": [
+    "index.d.ts",
+    "index.js",
+    "polyroute-wasmtime.node"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

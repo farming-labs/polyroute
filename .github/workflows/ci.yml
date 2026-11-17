@@ -56,6 +56,8 @@ jobs:
           python-version: "3.13"
       - run: pip install componentize-py==0.25.1
       - run: pnpm install --frozen-lockfile
+      # The addon for `experimental.runtime: "wasmtime"`, which its tests load.
+      - run: pnpm --filter @farming-labs/polyroute-wasmtime build
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
