@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { PolyrouteError } from "../errors.js";
 import { createQueue, runTool } from "./process.js";
@@ -37,7 +37,7 @@ export const go: Language = {
   build: (input) => enqueue(() => buildGoRoute(input)),
 };
 
-async function buildGoRoute({
+export async function buildGoRoute({
   routeFile,
   label,
   cacheDir,
@@ -60,7 +60,10 @@ async function buildGoRoute({
   const id = createHash("sha256").update(routeFile).digest("hex").slice(0, 12);
   const outDir = path.join(cacheDir, "go", id);
   await mkdir(outDir, { recursive: true });
-  const output = path.join(outDir, "route.wasm");
+  // Builds queue within a process, but another process, such as a second
+  // `vite build`, can build the same route at once. Each build writes its own
+  // file, so neither reads the other's half-written output.
+  const output = path.join(outDir, `route-${randomUUID()}.wasm`);
 
   const missing = `Building \`${label}\` needs Go 1.27.1 or later, but \`go\` isn't on PATH. Install it from https://go.dev/dl.`;
 
@@ -74,19 +77,22 @@ async function buildGoRoute({
     );
   }
 
-  const result = await runTool("go", ["tool", "componentize-go", "build", "-o", output], {
-    cwd: routeDir,
-    missing,
-  });
-  if (result.exitCode !== 0) {
-    const diagnostics = `${result.stdout}${result.stderr}`.trimEnd();
-    throw new PolyrouteError(
-      "BUILD_FAILED",
-      `componentize-go couldn't build \`${label}\`:\n\n${diagnostics}${componentizeGoHint(diagnostics)}`,
-    );
+  try {
+    const result = await runTool("go", ["tool", "componentize-go", "build", "-o", output], {
+      cwd: routeDir,
+      missing,
+    });
+    if (result.exitCode !== 0) {
+      const diagnostics = `${result.stdout}${result.stderr}`.trimEnd();
+      throw new PolyrouteError(
+        "BUILD_FAILED",
+        `componentize-go couldn't build \`${label}\`:\n\n${diagnostics}${componentizeGoHint(diagnostics)}`,
+      );
+    }
+    return { wasm: await readFile(output), sources: await listGoSources(routeDir) };
+  } finally {
+    await rm(output, { force: true });
   }
-
-  return { wasm: await readFile(output), sources: await listGoSources(routeDir) };
 }
 
 /** The next step for componentize-go failures whose own output doesn't say how to fix them. */

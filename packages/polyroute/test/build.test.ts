@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
-import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
+import { GO_REQUESTS_PER_INSTANCE, buildGoRoute } from "../src/languages/go.js";
 import { python } from "../src/languages/python.js";
 import { buildRustRoute } from "../src/languages/rust.js";
 import { IncomingRequest } from "../src/runtime/host.js";
@@ -455,6 +455,18 @@ describe("Go routes", () => {
     expect(counts.slice(0, 3)).toEqual([1, 2, 3]);
     expect(counts.at(-2)).toBe(GO_REQUESTS_PER_INSTANCE);
     expect(counts.at(-1)).toBe(1);
+  });
+
+  it("builds one route several times at once, as separate processes can", async () => {
+    // Calls the build directly: its queue only orders builds within a process.
+    const label = "go/echo/route.go";
+    const input = {
+      routeFile: path.join(fixturesDir, label),
+      label,
+      cacheDir: path.join(cacheDir, "polyroute"),
+    };
+    const builds = await Promise.allSettled([1, 2, 3].map(() => buildGoRoute(input)));
+    expect(builds.map((build) => build.status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
   });
 
   it("serves concurrent requests across a replacement without failing any", async () => {

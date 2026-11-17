@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PolyrouteError } from "../errors.js";
@@ -64,7 +64,23 @@ async function buildPythonRoute({
 
   const sources = await listPythonSources(routeDir);
   const world = (await anySendsRequests(sources)) ? OUTBOUND_ROUTE_WORLD : ROUTE_WORLD;
-  const output = path.join(workDir, "route.wasm");
+  // Each build writes its own file, as in go.ts, for builds in other processes.
+  const output = path.join(workDir, `route-${randomUUID()}.wasm`);
+  try {
+    return await componentize(label, world, workDir, routeDir, output, sources);
+  } finally {
+    await rm(output, { force: true });
+  }
+}
+
+async function componentize(
+  label: string,
+  world: string,
+  workDir: string,
+  routeDir: string,
+  output: string,
+  sources: string[],
+): Promise<RouteBuildResult> {
   const result = await runTool(
     "componentize-py",
     [
