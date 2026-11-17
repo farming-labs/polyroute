@@ -60,6 +60,12 @@ const routes = [
     body: '{"limit":10000,"primes":1229}',
   },
   {
+    // Each request also sends one to the TypeScript route above, on the same server.
+    name: "Rust relay (one outbound request)",
+    path: "/api/relay",
+    body: '{"relayed":{"message":"Hello from TypeScript"}}',
+  },
+  {
     name: "Go",
     path: "/api/slug?text=hello",
     body: '{"slug":"hello","text":"hello"}\n',
