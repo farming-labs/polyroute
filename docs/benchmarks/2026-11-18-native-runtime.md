@@ -1,6 +1,6 @@
 # Native runtime measurements, 2026-11-18
 
-The prototype does not meet the throughput acceptance in [RFC 0001](../rfcs/0001-native-runtime.md). It also does not meet the broader goal of beating matched TypeScript on every workload. Integration checks passing is a separate result.
+The prototype does not meet the throughput acceptance in [RFC 0001](../rfcs/0001-native-runtime.md). It also does not meet the broader goal of beating matched TypeScript on every workload. Integration checks passing is a separate result. The [later full comparison](2026-11-18-native-runtime-python-transfer.md), including the compiler split and Python transfer optimization, also misses the complete gate; keep its results separate from this historical baseline.
 
 ## CI comparison
 
@@ -83,8 +83,8 @@ The CLI’s default outbound implementation calls `TcpStream::connect` and creat
 
 ## Remaining evidence
 
-- Repeat acceptance against the final implementation; this run predates the compiler-free runtime.
-- The later [Python transfer comparison](../decisions/0007-native-python-http-transfers.md) improves local production throughput but still loses to matched TypeScript and does not establish a cold-start improvement. It does not replace the full Linux/macOS acceptance run above.
+- The [full comparison at `4449e377`](2026-11-18-native-runtime-python-transfer.md) now covers the compiler-free runtime and Python transfer optimization on Linux and macOS. It still fails complete acceptance; it is not a before/after comparison with this run.
+- The separate [Python transfer comparison](../decisions/0007-native-python-http-transfers.md) isolates that optimization locally. It improves production throughput but still loses to matched TypeScript and does not establish a cold-start improvement.
 - Retain the local compiler split’s initial 3.5% Rust 10,000-prime loss and its inconclusive focused repeat separately. Neither establishes a consistent throughput effect. See [ADR 0005](../decisions/0005-compiler-free-native-runtime.md).
 - Keep the [Go pin-lifetime hook](../decisions/0006-go-request-pin-lifetime.md) experimental until its lifecycle and performance checks finish.
 - Verify on the selected serverless provider. No provider deployment or performance result is claimed.

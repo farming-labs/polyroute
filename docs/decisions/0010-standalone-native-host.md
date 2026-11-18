@@ -1,6 +1,6 @@
 # 0010: Test a standalone native host with pooled outbound HTTP
 
-Status: isolated prototype built and compatibility probes passed, 2026-11-18. Matched performance measurements are running. No public runtime option, deploy adapter, or provider deployment is implemented.
+Status: isolated prototype built and compatibility probes passed, 2026-11-18. Matched local measurements are complete; the full throughput gate remains unmet. No public runtime option, deploy adapter, or provider deployment is implemented. A separate [serial-worker experiment](0011-standalone-serial-worker.md) is not adopted after a mixed short diagnostic.
 
 ## Problem
 
@@ -54,3 +54,52 @@ Final local verification used Node 24.21.0 and the release host:
 `python3 run.py` runs the twenty-sample cold comparisons followed by the five-round throughput comparisons at one and ten connections, with both A/A controls. It preserves raw reports, correctness failures, upstream request and connection counts, p95, environment, and artifact hashes. No local builds or other load tests run alongside these timings. Ordinary background operating-system activity remains present and the controls are required when interpreting the result.
 
 These checks establish the tested local behavior only. They do not establish exhaustive URL or network-error equivalence, trusted remote TLS success, Windows support, deployed package behavior, or serverless performance. The existing Go SDK oversized-response failure from ADR 0009 remains; the standalone host does not relax the write budget or include the isolated SDK fix. Neither an upstream SDK publication nor a provider deployment has occurred.
+
+## Matched local result
+
+The standalone comparison completed nine reports: 360 warm samples and 720 cold samples across six workloads, A/B, and both A/A controls. Every measured response and the relay’s total upstream request count validated, with zero errors and zero discarded samples. All recorded probe source and binary hashes remained unchanged through the run. Environment: Apple M1, 8 logical CPUs, darwin 25.2.0, Node 24.21.0. Background operating-system activity remained present; the measurements and controls are retained together.
+
+The host loads the identical production `.cwasm` components used by the addon. The TypeScript servers contain the matching route algorithms and the example’s existing Node request/response adapters. Both relay variants call the same separate upstream server. Native execution stays serialized without outbound imports; outbound execution retains its 32-request limit. This is a standalone deployment-shape experiment, not an isolated measurement of the cost of Node-API.
+
+| Workload                          | Native / TypeScript req/s, 1 connection |  Ratio | Native / TypeScript req/s, 10 connections |  Ratio |
+| --------------------------------- | --------------------------------------: | -----: | ----------------------------------------: | -----: |
+| Rust (little work)                |                          10,056 / 9,010 | 1.116× |                           16,207 / 17,317 | 0.936× |
+| Rust (primes to 10,000)           |                           4,638 / 2,751 | 1.686× |                             6,389 / 4,217 | 1.515× |
+| Rust (primes to 100,000)          |                               334 / 233 | 1.432× |                                 345 / 242 | 1.425× |
+| Go                                |                           6,296 / 8,985 | 0.701× |                           10,290 / 17,152 | 0.600× |
+| Python                            |                           7,003 / 7,574 | 0.925× |                           13,450 / 14,166 | 0.949× |
+| Rust relay (one outbound request) |                           5,576 / 5,013 | 1.112× |                           13,786 / 12,622 | 1.092× |
+
+| Workload                          | Native / TypeScript p95 at 1 connection (ms) | Native / TypeScript p95 at 10 connections (ms) |
+| --------------------------------- | -------------------------------------------: | ---------------------------------------------: |
+| Rust (little work)                |                                0.110 / 0.119 |                                  0.759 / 0.637 |
+| Rust (primes to 10,000)           |                                0.228 / 0.388 |                                  1.541 / 3.960 |
+| Rust (primes to 100,000)          |                                3.025 / 4.378 |                                29.252 / 70.477 |
+| Go                                |                                0.179 / 0.122 |                                  1.679 / 0.640 |
+| Python                            |                                0.150 / 0.140 |                                  0.860 / 0.727 |
+| Rust relay (one outbound request) |                                0.193 / 0.219 |                                  0.918 / 0.789 |
+
+| Workload                          | Native cold median / p95 (ms) | TypeScript cold median / p95 (ms) | Median difference (ms) |
+| --------------------------------- | ----------------------------: | --------------------------------: | ---------------------: |
+| Rust (little work)                |                 5.421 / 6.319 |                   48.652 / 53.112 |                -43.230 |
+| Rust (primes to 10,000)           |                 5.545 / 5.955 |                   48.556 / 52.339 |                -43.012 |
+| Rust (primes to 100,000)          |                 8.223 / 8.565 |                   53.045 / 54.263 |                -44.822 |
+| Go                                |                 8.107 / 8.319 |                   48.063 / 51.134 |                -39.955 |
+| Python                            |               11.733 / 12.598 |                   49.309 / 51.019 |                -37.576 |
+| Rust relay (one outbound request) |                 5.988 / 6.501 |                   55.245 / 58.858 |                -49.257 |
+
+Both A/A controls are retained per workload. Across workloads, paired native control ratios span 0.965–1.047× at one connection and 0.966–1.041× at ten; TypeScript spans 0.937–1.046× and 0.960–1.027× respectively. Native cold A/A median differences range from −0.385 to +0.269 ms, and TypeScript’s from −0.509 to +1.028 ms. The cold-start gaps are substantially larger than this control variation.
+
+The local cold-start improvement is clear, but throughput is incomplete: Go and Python remain below matched TypeScript at both connection counts, and light Rust falls below it at ten. The ten-connection relay has higher median throughput but worse p95 latency. Retain these losses rather than accepting only compute-heavy Rust or cold start. No Linux, Windows, provider, or production integration result is implied.
+
+The warm A/B relay reports contain 209,398 upstream requests over 11 connections at one connection, and 527,740 over 83 connections at ten. These counts cover both arms plus the reporting request; they are not per-variant connection counts. The dedicated earlier 1,000-request test establishes single-connection reuse for the native client. Long gaps between benchmark rounds can expire idle connections.
+
+The standalone binary is 8,404,320 bytes; SHA-256 `68853daf7f7343c6185622699185fd7d98f463e3a912968ba35b3a54b92ea54b`. Its size excludes the component, which is recorded separately for each route. The TypeScript artifact does not include the provider’s Node runtime. Neither a deployment size nor provider startup is inferred from these local files.
+
+`python3 run.py` produced all nine reports; `python3 summarize.py` recalculated the summary, checked report completeness and exact relay counts, and confirmed zero errors/discards. `comparison.html` presents the measurements, p95, and controls without combining them with CI or earlier experiments. The subsequent [serial-worker experiment](0011-standalone-serial-worker.md) is not adopted after a mixed short diagnostic.
+
+## Next diagnostic
+
+Profile an isolated copy of the original host before choosing another optimization. Record time spent instantiating or reusing the store, constructing the request, executing the guest and its imports, collecting the response, and retiring the instance. Include the surrounding HTTP preparation, dispatch wait, and response conversion. Keep the original source, binary, and benchmark reports unchanged. Use the same components and validate every response.
+
+Instrumentation adds overhead, so these measurements can locate a dominant phase but cannot establish an optimization gain. Keep initial requests and Go's periodic instance replacement identifiable in the raw records. Any resulting candidate still needs its own correctness checks and matched A/B and A/A comparison before adoption.
