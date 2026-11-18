@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: Run matched A/B and A/A performance measurements
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,6 +69,10 @@ jobs:
       - run: pnpm test
       - run: pnpm smoke
       - run: pnpm smoke:packed
+      - name: Preserve the jco build for matched benchmarks
+        if: inputs.benchmark && matrix.node == 24 && runner.os != 'Windows'
+        run: |
+          node --input-type=module -e 'import { cp } from "node:fs/promises"; await cp("examples/polyglot/dist", `${process.env.RUNNER_TEMP}/polyroute-jco`, { recursive: true });'
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: matrix.node == 24 && runner.os != 'Windows'
         with:
@@ -70,6 +80,7 @@ jobs:
           path: examples/polyglot/dist
           if-no-files-found: error
           retention-days: 7
+
       - run: pnpm smoke --runtime wasmtime
       - run: pnpm smoke:packed --runtime wasmtime
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -79,6 +90,34 @@ jobs:
           path: examples/polyglot/dist
           if-no-files-found: error
           retention-days: 7
+
+      - name: Measure matched workloads and A/A noise
+        if: inputs.benchmark && matrix.node == 24 && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/polyroute-bench"
+          baseline="$RUNNER_TEMP/polyroute-jco/server.js"
+          current="$PWD/examples/polyglot/dist/server.js"
+          test -d "$(dirname "$current")/polyroute/wasmtime"
+          test ! -d "$RUNNER_TEMP/polyroute-jco/polyroute/wasmtime"
+          mkdir -p "$report"
+          git rev-parse HEAD > "$report/source-commit.txt"
+          for connections in 1 10; do
+            node scripts/bench.mjs --server "$current" --baseline "$baseline" --matched --rounds 5 --duration 3 --warmup 1 --connections "$connections" --json > "$report/ab-$connections.json"
+            node scripts/bench.mjs --server "$current" --baseline "$current" --matched --rounds 5 --duration 3 --warmup 1 --connections "$connections" --json > "$report/aa-native-$connections.json"
+            node scripts/bench.mjs --server "$baseline" --baseline "$baseline" --matched --rounds 5 --duration 3 --warmup 1 --connections "$connections" --json > "$report/aa-jco-$connections.json"
+          done
+          node scripts/bench.mjs --server "$current" --baseline "$baseline" --matched --cold --rounds 20 --json > "$report/cold-ab.json"
+          node scripts/bench.mjs --server "$current" --baseline "$current" --matched --cold --rounds 20 --json > "$report/cold-aa-native.json"
+          node scripts/bench.mjs --server "$baseline" --baseline "$baseline" --matched --cold --rounds 20 --json > "$report/cold-aa-jco.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always() && inputs.benchmark && matrix.node == 24 && runner.os != 'Windows'
+        with:
+          name: matched-benchmarks-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/polyroute-bench
+          if-no-files-found: error
+          retention-days: 30
 
   native-quality:
     runs-on: ubuntu-latest
