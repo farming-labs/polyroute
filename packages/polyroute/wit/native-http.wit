@@ -1,0 +1,33 @@
+package polyroute:route;
+
+/// Private to components built for polyroute's native host. Resource ownership
+/// and validation follow the standard HTTP interfaces used by portable builds.
+interface native-http {
+  use wasi:http/types@0.2.12.{incoming-request, response-outparam};
+
+  record request-data {
+    method: string,
+    url: string,
+    headers: list<tuple<string, list<u8>>>,
+    body: list<u8>,
+  }
+
+  record response-data {
+    status: u16,
+    headers: list<tuple<string, list<u8>>>,
+    body: list<u8>,
+  }
+
+  read-request: func(request: borrow<incoming-request>) -> request-data;
+  send-response: func(outparam: response-outparam, response: response-data);
+}
+
+world native-route {
+  include route;
+  import native-http;
+}
+
+world native-outbound-route {
+  include outbound-route;
+  import native-http;
+}

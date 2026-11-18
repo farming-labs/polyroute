@@ -16,6 +16,7 @@ use napi::bindgen_prelude::{Buffer, PromiseRaw};
 use tokio::sync::Semaphore;
 
 mod outbound;
+mod python_http;
 use napi_derive::napi;
 use outbound::OutboundCallback;
 use wasmtime::component::{Component, Linker, ResourceTable};
@@ -294,6 +295,7 @@ impl Route {
         let mut linker = Linker::<Host>::new(engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .and_then(|()| wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker))
+            .and_then(|()| python_http::add_to_linker(&mut linker))
             .map_err(|error| napi::Error::from_reason(format!("{error:#}")))?;
         let pre = linker
             .instantiate_pre(&component)

@@ -269,9 +269,21 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
 
         const cacheDir = path.join(config.cacheDir, "polyroute");
         const started = performance.now();
-        const { wasm, sources } = await language.build({ routeFile, label, cacheDir });
+        const buildRuntime = config.command === "build" ? runtime : "jco";
+        const { wasm, sources } = await language.build({
+          routeFile,
+          label,
+          cacheDir,
+          runtime: buildRuntime,
+        });
         for (const source of sources) this.addWatchFile(source);
-        const transpiled = await transpileRoute(wasm, label, cacheDir, language.handlerHint);
+        const transpiled = await transpileRoute(
+          wasm,
+          label,
+          cacheDir,
+          language.handlerHint,
+          buildRuntime,
+        );
         if (transpiled.outbound && outbound === undefined) {
           throw new PolyrouteError(
             "OUTBOUND_NOT_ALLOWED",

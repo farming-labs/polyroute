@@ -84,6 +84,7 @@ The CLI’s default outbound implementation calls `TcpStream::connect` and creat
 ## Remaining evidence
 
 - Repeat acceptance against the final implementation; this run predates the compiler-free runtime.
+- The later [Python transfer comparison](../decisions/0007-native-python-http-transfers.md) improves local production throughput but still loses to matched TypeScript and does not establish a cold-start improvement. It does not replace the full Linux/macOS acceptance run above.
 - Retain the local compiler split’s initial 3.5% Rust 10,000-prime loss and its inconclusive focused repeat separately. Neither establishes a consistent throughput effect. See [ADR 0005](../decisions/0005-compiler-free-native-runtime.md).
 - Keep the [Go pin-lifetime hook](../decisions/0006-go-request-pin-lifetime.md) experimental until its lifecycle and performance checks finish.
 - Verify on the selected serverless provider. No provider deployment or performance result is claimed.
