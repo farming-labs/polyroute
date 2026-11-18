@@ -8,8 +8,32 @@ import { parseArgs } from "node:util";
 
 const probe = fileURLToPath(new URL(".", import.meta.url));
 const repo = path.resolve(probe, "../..");
-const { values } = parseArgs({ options: { output: { type: "string" } } });
+const { values } = parseArgs({
+  options: { output: { type: "string" }, set: { type: "string", default: "fixtures" } },
+});
 if (!values.output) throw new Error("Missing --output; provide a new artifact directory.");
+// `fixtures` are the protocol test routes. `benchmark` are the example routes
+// that have TypeScript twins with the same algorithm.
+const sets = {
+  fixtures: {
+    root: "packages/polyroute/test/fixtures",
+    routes: [
+      "counter/route.rs",
+      "go/counter/route.go",
+      "echo/route.rs",
+      "python/response/route.py",
+      "outbound/route.rs",
+      "go/outbound/route.go",
+      "python/outbound/route.py",
+    ],
+  },
+  benchmark: {
+    root: "examples/polyglot/app/api",
+    routes: ["primes/route.rs", "slug/route.go", "stats/route.py"],
+  },
+};
+const set = sets[values.set];
+if (!set) throw new Error(`Unknown --set \`${values.set}\`; use fixtures or benchmark.`);
 const output = path.resolve(values.output);
 await mkdir(output);
 const provenance = JSON.parse(await readFile(path.join(probe, "provenance.json")));
@@ -26,16 +50,8 @@ for (const source of provenance.productionSources) {
 const require = createRequire(path.join(repo, "packages/polyroute/package.json"));
 const { build } = await import(require.resolve("vite"));
 const { polyroute } = await import(path.join(repo, "packages/polyroute/dist/index.js"));
-const fixtures = path.join(repo, "packages/polyroute/test/fixtures");
-const routes = [
-  "counter/route.rs",
-  "go/counter/route.go",
-  "echo/route.rs",
-  "python/response/route.py",
-  "outbound/route.rs",
-  "go/outbound/route.go",
-  "python/outbound/route.py",
-];
+const fixtures = path.join(repo, set.root);
+const { routes } = set;
 const entry = path.join(output, "entry.ts");
 await writeFile(
   entry,

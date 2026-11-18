@@ -10,12 +10,15 @@ COPY probes/lambda/Cargo.toml probes/lambda/Cargo.lock probes/lambda/policy-case
 COPY probes/lambda/src ./src
 COPY packages/polyroute-wasmtime/src/python_http.rs /build/packages/polyroute-wasmtime/src/python_http.rs
 RUN cargo fmt --all --check \
-    && rustfmt --edition 2024 --check src/core.rs src/outbound.rs /build/packages/polyroute-wasmtime/src/python_http.rs \
+    && rustfmt --edition 2024 --check src/core.rs src/route.rs src/outbound.rs /build/packages/polyroute-wasmtime/src/python_http.rs \
     && cargo clippy --release --all-targets --locked -- -D warnings \
     && cargo test --release --locked \
     && cargo build --release --locked
 RUN mkdir /artifact && cp target/release/polyroute-lambda-probe /artifact/polyroute-lambda \
     && ldd /artifact/polyroute-lambda > /artifact/shared-libraries.txt \
-    && sha256sum /artifact/polyroute-lambda > /artifact/host.sha256
+    && sha256sum /artifact/polyroute-lambda > /artifact/host.sha256 \
+    && cp target/release/polyroute-vercel /artifact/polyroute-vercel \
+    && ldd /artifact/polyroute-vercel > /artifact/vercel-shared-libraries.txt \
+    && sha256sum /artifact/polyroute-vercel > /artifact/vercel-host.sha256
 FROM scratch AS artifact
 COPY --from=build /artifact/ /

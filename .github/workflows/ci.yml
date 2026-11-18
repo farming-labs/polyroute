@@ -159,6 +159,14 @@ jobs:
       - name: Run extracted artifacts through the AWS emulator
         run: |
           node probes/lambda/check-rie.mjs --packages "$RUNNER_TEMP/lambda-packages" --output "$RUNNER_TEMP/lambda-rie"
+      - name: Verify the Vercel bridge boundary
+        run: |
+          node probes/lambda/check-vercel.mjs --fixtures "$RUNNER_TEMP/lambda-fixtures/fixtures.json" --binary "$RUNNER_TEMP/lambda-host/polyroute-vercel" --output "$RUNNER_TEMP/vercel-protocol"
+      - name: Build and verify the Vercel Build Output
+        run: |
+          node probes/lambda/prepare.mjs --set benchmark --output "$RUNNER_TEMP/vercel-fixtures"
+          node probes/lambda/build-vercel-output.mjs --host "$RUNNER_TEMP/lambda-host/polyroute-vercel" --fixtures "$RUNNER_TEMP/vercel-fixtures/fixtures.json" --output "$RUNNER_TEMP/vercel/output"
+          node probes/lambda/check-vercel-output.mjs --output "$RUNNER_TEMP/vercel/output"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
@@ -169,6 +177,10 @@ jobs:
             ${{ runner.temp }}/lambda-packages/packages.json
             ${{ runner.temp }}/lambda-protocol
             ${{ runner.temp }}/lambda-rie
+            ${{ runner.temp }}/vercel-protocol
+            ${{ runner.temp }}/vercel
+          # Each function's `.vc-config.json` is a dotfile.
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
 

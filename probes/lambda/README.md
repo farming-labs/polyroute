@@ -31,3 +31,22 @@ The Docker build pins the AWS Amazon Linux 2023 image digest and Rust 1.99.1. It
 `check-runtime.mjs` exercises the real SDK through a local Runtime API fixture. `check-rie.mjs` runs the same twenty guest/HTTP groups through AWS's emulator. Shutdown cancellation, invalid startup manifests and rejected acknowledgements remain additional protocol-fixture checks. Neither harness measures cold start or throughput. Failed runs write their result reports and container logs; CI retains the packages and results for seven days. Test-created containers are removed by their exact IDs, and test servers are closed. Local output directories belong to the caller; retain them until the results are reviewed.
 
 No AWS credentials are used. Emulator success is not a deployment claim: provider wire behavior, deadlines/resource limits, initialization error reporting, arm64, production integration, packed public packages, and matched provider performance remain separate requirements.
+
+## Vercel executable function
+
+The same crate builds `polyroute-vercel` for [ADR 0018](../../docs/decisions/0018-vercel-executable-function.md). It serves one route through Vercel's official `vercel_runtime` bridge instead of the Lambda Runtime API. Both binaries include the same `core.rs`, `route.rs` and `outbound.rs`, so worker reuse, Go's replacement limit, trap retirement, the outbound policy and response validation are shared. Vercel starts the executable with no arguments, so it reads `manifest.json` from its own directory. A trap or invalid response returns a plain `500 Internal Server Error` and writes the cause to stderr.
+
+After the Docker build above:
+
+```sh
+node probes/lambda/check-vercel.mjs --fixtures /tmp/lambda-fixtures/fixtures.json \
+  --binary /tmp/lambda-host/polyroute-vercel --output /tmp/vercel-protocol
+node probes/lambda/prepare.mjs --set benchmark --output /tmp/vercel-fixtures
+node probes/lambda/build-vercel-output.mjs --host /tmp/lambda-host/polyroute-vercel \
+  --fixtures /tmp/vercel-fixtures/fixtures.json --output /tmp/vercel/output
+node probes/lambda/check-vercel-output.mjs --output /tmp/vercel/output
+```
+
+`check-vercel.mjs` runs the shared guest cases over HTTP, with a local unix socket standing in for Vercel's IPC bridge. It requires one `server-started` message before any request and one `end` message per request. HTTP headers are bytes, so the case that sends a character above U+00FF is reported as skipped, not passed.
+
+`build-vercel-output.mjs` writes a Build Output v3 directory. Each benchmark route appears twice: as a native `executable` function (`/api/primes`, `/api/slug`, `/api/stats`) and as its TypeScript twin on Node 24 (`/api/primes-ts`, and so on). `check-vercel-output.mjs` starts each native function as Vercel does and requires the same body as its twin. Nothing here deploys; `vercel deploy --prebuilt` from the output's parent directory needs a linked project and is a separate, explicit step.
