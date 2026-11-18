@@ -131,10 +131,12 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 The prototype differs from the proposed end state below:
 
-- `experimental.targets`, cross-compilation, and prebuilt distribution are not implemented. The compiler-free deployment addon is being verified in PR #23; Cranelift stays in its separate build-time binary.
+- `experimental.targets`, cross-compilation, and prebuilt distribution are not implemented. The compiler-free deployment addon passed the full integration matrix in PR #23; Cranelift stays in its separate build-time binary.
 - Development still uses jco and reports this explicitly. Native development parity remains unimplemented.
 - Routes without outbound imports use the synchronous Node-API path. Outbound routes use Tokio workers and call the existing JavaScript HTTP host, enforcing its allowlist and cancellation. At most 32 requests per route run concurrently; excess calls wait. This also bounds native per-request mode.
-- Outbound Rust, Go, and Python integration, workspace/packed smoke, and the full Linux/macOS/Windows matrix on Node 22 and 24 passed at `7daf491` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44295931880)). The compiler-free addon has passed the full macOS Node 24 suite and both runtimes' workspace/packed smoke locally; its cross-platform CI is pending. Passing these checks is separate from the throughput and cold-start acceptance below.
+- Outbound Rust, Go, and Python integration, workspace/packed smoke, and the full Linux/macOS/Windows matrix on Node 22 and 24 passed at `7daf491` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44295931880)). The compiler-free addon also passed this matrix at `d868f630` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44299249298)). Passing these checks is separate from the throughput and cold-start acceptance below.
+
+The [matched CI benchmark report](../benchmarks/2026-11-18-native-runtime.md) does not clear the throughput gate. Cold medians remain within the RFC’s allowance but slower than matched TypeScript. The local compiler split reduced addon size by 62.4%; it did not establish a timing improvement and showed a Rust throughput loss that did not reproduce in a focused repeat. No serverless-provider measurement or completed acceptance is claimed.
 
 The proposed configuration and packaging below describe remaining design work; they are not currently supported APIs.
 
@@ -156,7 +158,7 @@ polyroute({
 ### Packages
 
 - **`@farming-labs/polyroute-wasmtime`** is a Node-API addon built with napi-rs on the `wasmtime` and `wasmtime-wasi-http` crates. It ships prebuilt binaries as per-platform optional dependencies and is an optional peer of `@farming-labs/polyroute`.
-- **The runtime build has no compiler.** The addon that gets deployed only deserializes `.cwasm` files, so it can leave Cranelift out. That should make it smaller (we haven't measured it), and a missing `.cwasm` can never turn into a JIT compile at cold start. The build step uses a build that includes Cranelift. Both builds pin one wasmtime version, because a `.cwasm` only loads in the wasmtime version that wrote it. wasmtime returns an error for any other version.
+- **The runtime build has no compiler.** The addon that gets deployed only deserializes `.cwasm` files, so it can leave Cranelift out. The local prototype measured a 62.4% smaller addon (see ADR 0005), and a missing `.cwasm` can never turn into a JIT compile at cold start. The build step uses a build that includes Cranelift. Both builds pin one wasmtime version, because a `.cwasm` only loads in the wasmtime version that wrote it. wasmtime returns an error for any other version.
 
 ### Build
 
