@@ -11,6 +11,8 @@ A small Node server with a route in each of TypeScript, Rust, Go, and Python, al
 | `GET /api/slug?text=...`  | `app/api/slug/route.go`   | Turns text into a URL slug                        |
 | `POST /api/stats`         | `app/api/stats/route.py`  | Returns the count, mean, and median of numbers    |
 
+The `primes-ts`, `slug-ts`, `stats-ts`, and `relay-ts` routes provide TypeScript counterparts for `node scripts/bench.mjs --matched`. The benchmark sends the same payload to each pair and checks the same response bytes. The slug comparison uses ASCII text, and the statistics comparison uses `[1, 2, 3, 4]`; these fixtures do not claim identical Unicode or floating-point behavior for arbitrary inputs across languages.
+
 Building it needs Rust with the `wasm32-wasip2` target, Go 1.27.1 or newer, and componentize-py (see the [quick start](../../README.md#quick-start)). Running the built server needs only Node.
 
 Run it from the repository root after `pnpm install`:

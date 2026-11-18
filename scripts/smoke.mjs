@@ -9,6 +9,7 @@ import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { benchmarkRoutes } from "./bench-routes.mjs";
 
 const repo = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = path.join(repo, "packages/polyroute");
@@ -173,6 +174,9 @@ const checks = [
         status: 500,
       },
   { name: "unknown path", path: "/api/missing", status: 404 },
+  ...benchmarkRoutes
+    .filter((route) => route.matchedOnly && route.language === "TypeScript")
+    .map((route) => ({ ...route, status: 200 })),
 ];
 
 const { appDir, cleanup } = packed ? await preparePackedApp() : await prepareWorkspaceApp();

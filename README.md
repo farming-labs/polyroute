@@ -396,6 +396,19 @@ A trapped request throws from `fetch`, so your framework's error handling decide
 
 ## Performance
 
+For language comparisons, use `node scripts/bench.mjs --matched`. It pairs the Rust prime and relay routes, Go slug route, and Python statistics route with TypeScript implementations of the same workloads. Every paired response must match the same expected bytes. The greeting is a server overhead reference, not a substitute for these workload baselines.
+
+Use the same production app, inputs, machine, and connection count for each runtime. For example, after building both runtimes:
+
+```bash
+node scripts/bench.mjs --server /path/to/native/server.js --baseline /path/to/jco/server.js --matched --rounds 9 --duration 5 --warmup 2 --connections 1 --json > /tmp/polyroute-throughput.json
+node scripts/bench.mjs --server /path/to/native/server.js --baseline /path/to/jco/server.js --matched --cold --rounds 20 --json > /tmp/polyroute-cold.json
+```
+
+Repeat throughput with `--connections 10`. Measure A/A noise by passing the same server file as both `--server` and `--baseline`. Each round reverses both the route and build order. `--json` writes a versioned report with every round, median throughput, median p50/p95/p99 request latency, cold-start median/p95, errors including warmup, and CPU, OS, Node, and load-average details. No samples are discarded. Keep raw reports outside the repository, report losses, and treat effects smaller than A/A variation as inconclusive. These commands fail for the current native runtime when they reach the unsupported outbound relay; omitting it does not satisfy native acceptance.
+
+The historical table below measures different workloads and cannot establish a language speedup:
+
 Measured with `pnpm bench` on the example's production build, with all routes served by one Node process and every response body checked:
 
 | Route                                           | Requests/s |     p50 |    p99 | With a fresh instance per request |
