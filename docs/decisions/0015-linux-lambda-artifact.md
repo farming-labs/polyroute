@@ -1,6 +1,6 @@
 # 0015: Verify the native Lambda artifact on Amazon Linux
 
-Status: private Linux host and protocol checks passed, 2026-11-18; the first emulator run exposed a missing package variant. Its fix requires another CI run. No provider measurement is verified yet.
+Status: the private Linux artifact, SDK protocol and extracted-package emulator checks pass, 2026-11-18. No provider deployment or performance measurement is verified yet.
 
 ## Problem and scope
 
@@ -48,3 +48,11 @@ Preparing fresh local fixtures failed with `ENOSPC` in componentization and the 
 [Run 44353064591](https://github.com/farming-labs/polyroute/actions/runs/44353064591), at `12f203ea168d09b6ac75bf0d39de5735ba66145e`, prepared all seven fresh guest fixtures, built the real host in the pinned Amazon Linux image, passed formatting/Clippy and seven Rust tests, and passed all 23 SDK protocol groups with 1,103 result posts. It verified 13 extracted archives. The emulator passed 19 groups and failed one before invocation: the Rust echo fixture had no package with `perRequest: true`. The 1,100 executed invocations do not include that missing case. The failed result and container logs are retained in artifact `14449532887` and the job log.
 
 The package builder now includes both execution modes for Rust echo, producing 14 archives for this fixture set. A filesystem regression test requires both manifests and the unchanged Rust reuse limit; it fails against the original builder and passes with the added variant. `python3 probes/lambda/package_test.py` now passes four tests. The emulator case and its assertions remain unchanged. A new complete Linux run is still required; neither this correction nor the partial emulator result establishes provider performance.
+
+## Corrected Linux artifact verification
+
+The `lambda-probe` job in [run 44356468746](https://github.com/farming-labs/polyroute/actions/runs/44356468746), at `e9a384ae852ffdcae17439612779fc9a413ac224`, passed the complete Linux pipeline. It built fresh components and the compiler-free host in the pinned Amazon Linux image, passed seven Rust tests and formatting/Clippy, verified 14 extracted function archives, and passed all twenty emulator groups with 1,101 invocations. The previously missing Rust echo per-request case executed and passed. The unchanged SDK protocol suite passed all 23 groups with 1,103 result posts: 1,079 responses, 24 deliberate invocation errors, 1,101 accepted acknowledgements and two intentional rejected acknowledgements.
+
+The uploaded artifact is `lambda-probe-Linux-X64`, ID `14452527564`, 128,990,808 bytes, SHA-256 `3185e61e40c80cbacd4159b7f3bfa9c14e1114c4bc052cfdb283f585362f2b76`. A separate download verification checked that outer digest, each of the fourteen nested ZIP digests, and every packaged file's bytes, size and Unix mode against `packages.json`. The host hash is `65047a5ab664356209482bf9fd5eff466da8ef81be89c6818e496d801f03e722`. Its shared-library listing resolves the loader, libc, libm and libgcc inside Amazon Linux. The small result reports, package manifest and verification record are retained in `/tmp/polyroute-lambda-linux-e9a384a-20261118`; the CI artifact retains the binaries and container logs for seven days.
+
+This proves the private x86_64 packaging and emulator milestone. It does not prove compatibility with every Lambda CPU, arm64, provider wire behavior and scheduling, resource/deadline limits, initialization-error reporting, production deployment integration, or matched provider cold/warm performance. The complete cross-platform PR matrix was still running when this job was inspected, so this is not a claim that every PR check passed.

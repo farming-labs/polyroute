@@ -1,6 +1,6 @@
 # 0016: Measure the combined Go cleanup changes
 
-Status: isolated combined candidate passes local correctness checks, 2026-11-18; performance is unmeasured. No production SDK change or upstream publication.
+Status: isolated combined candidate passes local correctness checks and improves measured throughput, 2026-11-18; it still trails TypeScript and does not improve cold start. No production SDK change or upstream publication.
 
 ## Problem and scope
 
@@ -37,4 +37,32 @@ The first generator source copy exhausted local disk and was moved to `generator
 
 Compression manifests record original sizes, modes, timestamps and SHA-256 hashes, and restore scripts preserve the archived bytes. A redundant generator binary was hash-verified against its existing build output and hard-linked to recover space; neither path may be rebuilt in place while linked. Sources and benchmark reports remain intact. These storage operations occurred before any timing.
 
-The slug artifacts, combined A/B and A/A comparisons, cold samples, production integration, provider measurements and upstream maintenance path remain unverified. Correctness alone does not establish a combined speedup, a TypeScript win, or merge readiness.
+The correctness-only artifacts were subsequently compressed with the same size/hash verification and restore instructions before building the separate slug artifacts. The benchmark inputs remain uncompressed. No build, compression, or other load test ran during timing.
+
+## Full combined comparison
+
+`node build-slug.mjs` built both SDK variants from the unchanged example route and verified the exact response. `node measure.mjs --mode check --comparison ab` verified the baseline, combined candidate and matched TypeScript through real HTTP. Both native arms use the original standalone host, with SHA-256 `68853daf7f7343c6185622699185fd7d98f463e3a912968ba35b3a54b92ea54b`; the host, route algorithm, TypeScript bundle, compiler settings and 1,000-request limit are unchanged.
+
+`python3 run-full.py` completed twelve reports with 90 warm samples and 180 cold samples, zero response errors and no discarded samples. `python3 summarize.py` verifies the run counts, alternating order, settings, zero unexpected upstream requests, medians/p95, and 159 source/artifact records. Warm measurements use five alternating rounds, one-second warmups and three-second samples at one and ten connections. Each arm has its own A/A control. Cold comparisons use twenty samples per arm, timing process launch through the first verified response and excluding shutdown.
+
+Environment: Apple M1 with eight logical CPUs, darwin 25.2.0 arm64, Node 24.21.0, Go 1.27.4 and Wasmtime 50.0.2. Ordinary operating-system activity remains present; preflight/postflight process snapshots and each report's load averages are retained. These results are a separate comparison and are not combined with earlier runs.
+
+| Connections | Baseline / combined / TypeScript req/s | Combined / baseline | Combined / TypeScript |
+| ----------- | -------------------------------------: | ------------------: | --------------------: |
+| 1           |                  6,310 / 7,159 / 9,080 |              1.135× |                0.788× |
+| 10          |               10,450 / 13,021 / 18,248 |              1.246× |                0.714× |
+
+| Connections | Baseline / combined / TypeScript p95 (ms) | Baseline A/A paired ratios | Combined A/A paired ratios | TypeScript A/A paired ratios |
+| ----------- | ----------------------------------------: | -------------------------: | -------------------------: | ---------------------------: |
+| 1           |                     0.180 / 0.154 / 0.119 |               0.997–1.038× |               0.946–1.010× |                 0.992–1.030× |
+| 10          |                     1.657 / 1.332 / 0.575 |               0.994–1.018× |               0.977–1.014× |                 0.983–1.025× |
+
+The combined change improves throughput by 13.47% at one connection and 24.60% at ten, beyond the observed A/A variation. It still reaches only 78.85% and 71.36% of matched TypeScript throughput, with higher p95 latency. This comparison includes the identical writer fix in both arms; it does not measure the total change from the unmodified production SDK.
+
+Local process cold-start median/p95 is 7.795/8.179 ms for the baseline, 7.960/8.658 ms for the combined candidate, and 49.436/51.652 ms for TypeScript. The candidate median increases by 0.166 ms. Baseline/candidate A/A median differences are −0.047/+0.028 ms, and TypeScript's is +0.819 ms. No cleanup-related cold-start improvement is established. The native process advantage over Node does not establish a provider cold-start result.
+
+The baseline/candidate component sizes are 7,080,514/7,096,534 bytes before precompilation and 13,976,488/14,015,816 bytes after precompilation. The host remains 8,404,320 bytes. The manifest records exact hashes for the generator sources, both complete SDK source sets, benchmark scripts and artifacts; raw reports, command records and the summarizer remain in the owned experiment directory.
+
+## Decision
+
+Retain the combined change as a measured optimization candidate. Correctness and throughput improve, but the remaining TypeScript gap prevents performance acceptance. Production integration, cross-platform and packed checks, provider measurements, and the upstream maintenance path remain unverified. Do not silently patch caller SDK dependencies or merge on the strength of this one-workload result.
