@@ -103,3 +103,31 @@ The standalone binary is 8,404,320 bytes; SHA-256 `68853daf7f7343c6185622699185f
 Profile an isolated copy of the original host before choosing another optimization. Record time spent instantiating or reusing the store, constructing the request, executing the guest and its imports, collecting the response, and retiring the instance. Include the surrounding HTTP preparation, dispatch wait, and response conversion. Keep the original source, binary, and benchmark reports unchanged. Use the same components and validate every response.
 
 Instrumentation adds overhead, so these measurements can locate a dominant phase but cannot establish an optimization gain. Keep initial requests and Go's periodic instance replacement identifiable in the raw records. Any resulting candidate still needs its own correctness checks and matched A/B and A/A comparison before adoption.
+
+## Phase attribution
+
+Two isolated instrumented copies completed the six workloads at one and ten connections. Each run validates 1,000 initial requests and 5,000 subsequent requests per workload/count, retaining every record: 72,000 correct responses and 144,000 paired HTTP/worker spans per copy. `node profile-http.mjs` accounts for every span and the exact relay count. `python3 summarize.py <experiment-directory>` validates phase sums, request identifiers, completeness, and all original and instrumented source/artifact hashes. No source or binary from the completed throughput comparison changed.
+
+The first copy, `polyroute-standalone-profile-20261118`, records worker phases without changing the engine or guest. These are means over the prescribed 5,000 subsequent requests, in microseconds; initial records and p95 remain in the raw reports.
+
+| Workload | Connections | Whole worker | Guest execution plus imports | Store creation/reuse plus retirement |
+| -------- | ----------: | -----------: | ---------------------------: | -----------------------------------: |
+| Go       |           1 |        76.84 |                        72.72 |                                 1.13 |
+| Go       |          10 |        83.49 |                        78.51 |                                 1.23 |
+| Python   |           1 |        41.92 |                        38.87 |                                 0.20 |
+| Python   |          10 |        47.65 |                        43.37 |                                 0.23 |
+
+Go still replaces its instance every 1,000 requests. All six creations and retirements in each 6,000-request run are identifiable. Their measured cost is included; the remaining overhead is not primarily the periodic replacement.
+
+The second copy, `polyroute-standalone-import-profile-20261118`, additionally enables Wasmtime's `call-hook` feature and records nested transitions between Wasm and host execution during the guest call. These timings include instrumentation overhead and must not be compared as a before/after result with the first copy.
+
+| Workload | Connections | Host interval mean (µs) | Wasm interval mean (µs) | Median host transitions per request |
+| -------- | ----------: | ----------------------: | ----------------------: | ----------------------------------: |
+| Go       |           1 |                    9.29 |                   65.33 |                                  29 |
+| Go       |          10 |                    9.85 |                   68.26 |                                  29 |
+| Python   |           1 |                    7.77 |                   35.12 |                                   4 |
+| Python   |          10 |                    7.81 |                   33.67 |                                   4 |
+
+These transitions include Wasmtime runtime calls, not only named WASI imports. Wasm time includes the language runtime, SDK, guest-side binding work, and route code. The counters do not identify which of those dominates. Host intervals include canonical lifting/lowering and any nested execution is charged to its active mode. Not every trivial runtime call participates in Wasmtime's hook.
+
+The diagnostic supports investigating guest-side work next. It does not justify removing Go's resource-lifetime cap, dropping HTTP work, or attributing all Wasm time to the route algorithm. [ADR 0012](0012-python-response-encoder.md) tests one small repeated allocation in Python's response adapter. Go's remaining cost, production integration, and provider verification remain open.
