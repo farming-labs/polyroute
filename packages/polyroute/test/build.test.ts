@@ -6,7 +6,8 @@ import { pathToFileURL } from "node:url";
 import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { polyroute } from "../src/index.js";
-import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
+import { GO_REQUESTS_PER_INSTANCE, buildGoRoute } from "../src/languages/go.js";
+import { python } from "../src/languages/python.js";
 import { buildRustRoute } from "../src/languages/rust.js";
 import { IncomingRequest } from "../src/runtime/host.js";
 import { createWasiHttpHandler, type WasiHttpRoute } from "../src/runtime/index.js";
@@ -456,6 +457,18 @@ describe("Go routes", () => {
     expect(counts.at(-1)).toBe(1);
   });
 
+  it("builds one route several times at once, as separate processes can", async () => {
+    // Calls the build directly: its queue only orders builds within a process.
+    const label = "go/echo/route.go";
+    const input = {
+      routeFile: path.join(fixturesDir, label),
+      label,
+      cacheDir: path.join(cacheDir, "polyroute"),
+    };
+    const builds = await Promise.allSettled([1, 2, 3].map(() => buildGoRoute(input)));
+    expect(builds.map((build) => build.status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
+  });
+
   it("serves concurrent requests across a replacement without failing any", async () => {
     const counts = await Promise.all(
       Array.from({ length: 2 * GO_REQUESTS_PER_INSTANCE + 3 }, () => count(routes.goCounter)),
@@ -466,10 +479,48 @@ describe("Go routes", () => {
 });
 
 describe("build-time checks", () => {
-  it("rejects a route that needs outbound HTTP, naming the missing interface", async () => {
+  it("rejects a route that sends HTTP requests unless `outbound` lists hosts", async () => {
+    // Rolldown reports the Rust, Go, and Python routes' errors together.
+    const failure = buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound"));
+    await expect(failure).rejects.toThrow(
+      'PolyrouteError: `outbound/route.rs` sends HTTP requests (it imports `wasi:http/outgoing-handler`), and polyroute allows none by default. List the hosts routes may call, for example `polyroute({ outbound: { allow: ["api.example.com"] } })`.',
+    );
+    await expect(failure).rejects.toThrow(
+      "PolyrouteError: `go/outbound/route.go` sends HTTP requests",
+    );
+    await expect(failure).rejects.toThrow(
+      "PolyrouteError: `python/outbound/route.py` sends HTTP requests",
+    );
+  });
+
+  it("rejects an async Python handler in a route that can't send requests", async () => {
+    const label = "python/async/route.py";
     await expect(
-      buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound")),
-    ).rejects.toThrow(/imports `wasi:http\/outgoing-handler`/);
+      python.build({
+        routeFile: path.join(fixturesDir, label),
+        label,
+        cacheDir: path.join(cacheDir, "polyroute"),
+      }),
+    ).rejects.toMatchObject({
+      code: "BUILD_FAILED",
+      message: expect.stringContaining(
+        "route.py has an async handler, which polyroute runs on componentize-py's poll_loop.",
+      ),
+    });
+  });
+
+  it("rejects every `outbound.allow` entry that isn't a host, at once", () => {
+    expect(() =>
+      polyroute({
+        outbound: { allow: ["api.example.com", "https://example.com", "example.com/path", ""] },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "INVALID_OPTIONS",
+        message:
+          'Every `outbound.allow` entry must be a host such as `api.example.com`, `localhost:8787`, `*.example.com`, or `*`, without a scheme or path. These aren\'t: "https://example.com", "example.com/path", "".',
+      }),
+    );
   });
 
   it("rejects an `instances` value it doesn't know, naming the accepted ones", () => {

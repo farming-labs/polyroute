@@ -10,10 +10,14 @@ A Python route is a module that defines a function per HTTP method:
 polyroute builds the module into a WebAssembly component with componentize-py.
 This file turns the component's `wasi:http` request into a `Request`, calls
 the matching function, and writes the returned `Response` back.
+
+A handler can be `async def`, to send requests with `polyroute_fetch.fetch`.
+polyroute runs it on componentize-py's `poll_loop`.
 """
 
 from __future__ import annotations
 
+import inspect
 import json as _json
 from types import ModuleType
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
@@ -89,7 +93,7 @@ class Response:
         return response
 
 
-Handler = Callable[[Request], Response]
+Handler = Callable[[Request], Any]
 
 
 def create_handler(module: ModuleType) -> type:
@@ -105,6 +109,11 @@ def create_handler(module: ModuleType) -> type:
             f"HTTP method, for example `def GET(request): ...`."
         )
     allowed = sorted(set(handlers) | ({"HEAD"} if "GET" in handlers else set()))
+    run = (
+        _event_loop(module.__name__)
+        if any(inspect.iscoroutinefunction(handler) for handler in handlers.values())
+        else None
+    )
 
     class IncomingHandler(exports.IncomingHandler):
         def handle(
@@ -118,6 +127,8 @@ def create_handler(module: ModuleType) -> type:
                 response = Response(status=405, headers={"allow": ", ".join(allowed)})
             else:
                 response = handler(incoming)
+                if run is not None and inspect.iscoroutine(response):
+                    response = run(response)
                 if not isinstance(response, Response):
                     raise TypeError(
                         f"{module.__name__}.{incoming.method} returned "
@@ -126,6 +137,28 @@ def create_handler(module: ModuleType) -> type:
             _send(response, response_out)
 
     return IncomingHandler
+
+
+def _event_loop(module_name: str) -> Callable[[Any], Any]:
+    """Returns a function that runs a coroutine to completion on componentize-py's `poll_loop`."""
+    import asyncio
+
+    try:
+        from poll_loop import PollLoop
+    except ImportError as error:
+        raise ImportError(
+            f"{module_name}.py has an async handler, which polyroute runs on componentize-py's "
+            "poll_loop. poll_loop needs `wasi:http/outgoing-handler`, which polyroute adds only "
+            "to a route whose files import `polyroute_fetch` or `poll_loop`. Import `fetch` "
+            "from `polyroute_fetch`, or make the handler a plain `def`."
+        ) from error
+
+    def run(coroutine: Any) -> Any:
+        loop = PollLoop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coroutine)
+
+    return run
 
 
 def _read_request(request: types.IncomingRequest) -> Request:

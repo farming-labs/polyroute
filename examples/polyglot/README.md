@@ -2,13 +2,14 @@
 
 A small Node server with a route in each of TypeScript, Rust, Go, and Python, all discovered by the same file router.
 
-| Route                     | File                      | What it does                                   |
-| ------------------------- | ------------------------- | ---------------------------------------------- |
-| `GET /api/hello`          | `app/api/hello/route.ts`  | Returns a JSON greeting                        |
-| `GET /api/primes?limit=N` | `app/api/primes/route.rs` | Counts primes below `N`                        |
-| `POST /api/shout`         | `app/api/shout/route.rs`  | Returns the request body in uppercase          |
-| `GET /api/slug?text=...`  | `app/api/slug/route.go`   | Turns text into a URL slug                     |
-| `POST /api/stats`         | `app/api/stats/route.py`  | Returns the count, mean, and median of numbers |
+| Route                     | File                      | What it does                                      |
+| ------------------------- | ------------------------- | ------------------------------------------------- |
+| `GET /api/hello`          | `app/api/hello/route.ts`  | Returns a JSON greeting                           |
+| `GET /api/primes?limit=N` | `app/api/primes/route.rs` | Counts primes below `N`                           |
+| `POST /api/shout`         | `app/api/shout/route.rs`  | Returns the request body in uppercase             |
+| `GET /api/relay`          | `app/api/relay/route.rs`  | Calls `/api/hello` over HTTP and wraps the answer |
+| `GET /api/slug?text=...`  | `app/api/slug/route.go`   | Turns text into a URL slug                        |
+| `POST /api/stats`         | `app/api/stats/route.py`  | Returns the count, mean, and median of numbers    |
 
 Building it needs Rust with the `wasm32-wasip2` target, Go 1.27.1 or newer, and componentize-py (see the [quick start](../../README.md#quick-start)). Running the built server needs only Node.
 

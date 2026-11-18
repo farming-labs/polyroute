@@ -60,6 +60,11 @@ const HOST_CALL =
 const RETURNS_VALUE = /task\.resolve\(\[(.+)\]\);\n\s*task\.exit\(\);\n\s*return (.+);$/;
 const RETURNS_NOTHING = /task\.resolve\(\[ret\]\);\n\s*task\.exit\(\);$/;
 
+// With JSPI, jco marks each import that may suspend this way, and lowers it
+// through its suspending wrapper instead.
+const MANUALLY_ASYNC = /\.manuallyAsync\s*=(?!=)/g;
+const MANUALLY_ASYNC_TRAMPOLINE = /^\s*(_trampoline\d+)\.manuallyAsync = !0;$/gm;
+
 const CHECK_MAY_LEAVE = "__jcoEmbeddedRuntime$checkMayLeave";
 const HOST_TASK = "__polyrouteSyncHostTask";
 
@@ -93,10 +98,15 @@ export interface SyncImportRewrite {
 export function skipSyncTaskBookkeeping(bindings: string): SyncImportRewrite {
   const imports = [...bindings.matchAll(LOWERED_IMPORT)];
   const unchanged = { bindings, rewritten: 0, lowered: imports.length };
+  // Imports that may suspend keep jco's code. Every assignment has to be one
+  // this recognizes, or a trampoline marked some other way could be rewritten.
+  const suspending = new Set(
+    [...bindings.matchAll(MANUALLY_ASYNC_TRAMPOLINE)].map(([, name]) => name!),
+  );
   if (
     imports.length === 0 ||
     !bindings.includes(`function ${CHECK_MAY_LEAVE}(`) ||
-    /\.manuallyAsync\s*=(?!=)/.test(bindings)
+    count(bindings, MANUALLY_ASYNC) !== suspending.size
   ) {
     return unchanged;
   }
@@ -111,6 +121,7 @@ export function skipSyncTaskBookkeeping(bindings: string): SyncImportRewrite {
     if (
       head === null ||
       head[2] !== target ||
+      suspending.has(target!) ||
       references.get(target!) !== 1 ||
       options!.includes("_lowerImportBackwardsCompat.bind(") ||
       !SYNC_IMPORT_FLAGS.test(options!)

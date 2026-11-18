@@ -1,9 +1,18 @@
 // An in-memory host for the WASI 0.2 interfaces an HTTP handler component
 // imports. Request and response bodies are fully buffered, so every stream is
-// always ready and the guest's `handle` export runs to completion synchronously.
+// always ready. A route that doesn't send outbound requests runs its `handle`
+// export to completion synchronously. One that does is transpiled with JSPI,
+// so `poll` and `pollable.block` can suspend it while a response arrives.
 
 import type { SUPPORTED_INTERFACES } from "../interfaces.js";
 import { createDeniedImports } from "./denied.js";
+import {
+  sendOutbound,
+  toErrorCode,
+  type OutboundPolicy,
+  type OutboundResponse,
+  type OutboundResult,
+} from "./outbound.js";
 
 type StreamError = { tag: "closed" };
 type HeaderError = { tag: "invalid-syntax" } | { tag: "forbidden" } | { tag: "immutable" };
@@ -91,53 +100,131 @@ function sleepUntil(deadline: bigint): void {
   Atomics.wait(sleepCell, 0, 0, remainingMs);
 }
 
+/** Resolves at `deadline` without blocking the thread. `cancel` stops the timer early. */
+function delayUntil(deadline: bigint): { promise: Promise<void>; cancel(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, Math.max(0, Number(deadline - monotonicNow()) / 1_000_000));
+  });
+  return { promise, cancel: () => clearTimeout(timer) };
+}
+
 // wasi:io/poll
 
-let pollableDeadline: (pollable: Pollable) => bigint | undefined;
+/** An operation, such as an outbound request, that a pollable can wait for. */
+interface Pending {
+  done: boolean;
+  /** Resolves once `done` is true. Never rejects. */
+  readonly promise: Promise<void>;
+}
+
+interface PollableState {
+  deadline: bigint | undefined;
+  pending: Pending | undefined;
+  suspends: boolean;
+}
+
+let pollableState: (pollable: Pollable) => PollableState;
 
 export class Pollable {
   readonly #deadline: bigint | undefined;
+  readonly #pending: Pending | undefined;
+  readonly #suspends: boolean;
 
-  /** A pollable without a deadline is always ready. */
-  constructor(deadline?: bigint) {
+  /**
+   * A pollable without a deadline or a pending operation is always ready.
+   * `suspends` is true in routes transpiled with JSPI, where waiting for a
+   * deadline returns a promise instead of blocking the thread.
+   */
+  constructor(deadline?: bigint, suspends = false, pending?: Pending) {
     this.#deadline = deadline;
+    this.#suspends = suspends;
+    this.#pending = pending;
   }
 
   ready(): boolean {
+    if (this.#pending !== undefined) return this.#pending.done;
     return this.#deadline === undefined || monotonicNow() >= this.#deadline;
   }
 
-  block(): void {
-    if (this.#deadline !== undefined) sleepUntil(this.#deadline);
+  block(): Promise<void> | undefined {
+    if (this.ready()) return undefined;
+    if (this.#pending !== undefined) return this.#pending.promise;
+    if (this.#suspends) return delayUntil(this.#deadline!).promise;
+    sleepUntil(this.#deadline!);
+    return undefined;
   }
 
   static {
-    pollableDeadline = (pollable) => pollable.#deadline;
+    pollableState = (pollable) => ({
+      deadline: pollable.#deadline,
+      pending: pollable.#pending,
+      suspends: pollable.#suspends,
+    });
   }
 }
 
-export function poll(pollables: Pollable[]): Uint32Array {
+function readyIndexes(pollables: Pollable[]): Uint32Array | undefined {
+  const ready: number[] = [];
+  pollables.forEach((pollable, index) => {
+    if (pollable.ready()) ready.push(index);
+  });
+  return ready.length > 0 ? Uint32Array.from(ready) : undefined;
+}
+
+function earliestDeadline(states: PollableState[]): bigint | undefined {
+  let earliest: bigint | undefined;
+  for (const { deadline, pending } of states) {
+    if (pending !== undefined || deadline === undefined) continue;
+    if (earliest === undefined || deadline < earliest) earliest = deadline;
+  }
+  return earliest;
+}
+
+const WAITS_FOREVER = "wasi:io/poll#poll would wait forever: no pollable can become ready.";
+
+/**
+ * Returns the ready pollables' indexes. When none is ready, a route that
+ * suspends gets a promise, and any other route blocks until a deadline passes.
+ */
+export function poll(pollables: Pollable[]): Uint32Array | Promise<Uint32Array> {
   if (pollables.length === 0) {
     throw new Error("wasi:io/poll#poll was called with an empty list.");
   }
+  const ready = readyIndexes(pollables);
+  if (ready !== undefined) return ready;
+  const states = pollables.map(pollableState);
+  if (states.some((state) => state.suspends || state.pending !== undefined)) {
+    return pollSuspending(pollables, states);
+  }
   for (;;) {
-    const ready: number[] = [];
-    let earliest: bigint | undefined;
-    pollables.forEach((pollable, index) => {
-      if (pollable.ready()) {
-        ready.push(index);
-        return;
-      }
-      const deadline = pollableDeadline(pollable);
-      if (deadline !== undefined && (earliest === undefined || deadline < earliest)) {
-        earliest = deadline;
-      }
-    });
-    if (ready.length > 0) return Uint32Array.from(ready);
-    if (earliest === undefined) {
-      throw new Error("wasi:io/poll#poll would wait forever: no pollable can become ready.");
-    }
+    const earliest = earliestDeadline(states);
+    if (earliest === undefined) throw new Error(WAITS_FOREVER);
     sleepUntil(earliest);
+    const ready = readyIndexes(pollables);
+    if (ready !== undefined) return ready;
+  }
+}
+
+async function pollSuspending(
+  pollables: Pollable[],
+  states: PollableState[],
+): Promise<Uint32Array> {
+  for (;;) {
+    const waits = states.flatMap((state) =>
+      state.pending === undefined ? [] : [state.pending.promise],
+    );
+    const earliest = earliestDeadline(states);
+    const timer = earliest === undefined ? undefined : delayUntil(earliest);
+    if (timer !== undefined) waits.push(timer.promise);
+    if (waits.length === 0) throw new Error(WAITS_FOREVER);
+    try {
+      await Promise.race(waits);
+    } finally {
+      timer?.cancel();
+    }
+    const ready = readyIndexes(pollables);
+    if (ready !== undefined) return ready;
   }
 }
 
@@ -286,6 +373,12 @@ class BodySink implements StreamSink {
   readonly chunks: Uint8Array[] = [];
   size = 0;
   finished = false;
+  dropped = false;
+  /**
+   * Called once the guest finishes the body (`true`) or drops it unfinished
+   * (`false`). Outbound requests wait for it before they're sent.
+   */
+  onSettled: ((finished: boolean) => void) | undefined;
 
   write(bytes: Uint8Array): void {
     this.chunks.push(bytes);
@@ -508,10 +601,18 @@ export class OutgoingBody {
     if (trailers !== undefined) {
       throw {
         tag: "internal-error",
-        val: "polyroute doesn't support response trailers yet.",
+        val: "polyroute doesn't support trailers yet.",
       } satisfies ErrorCode;
     }
     body.#sink.finished = true;
+    body.#sink.onSettled?.(true);
+  }
+
+  // jco calls this when the guest drops the body.
+  [Symbol.dispose](): void {
+    if (this.#sink.finished) return;
+    this.#sink.dropped = true;
+    this.#sink.onSettled?.(false);
   }
 
   static {
@@ -609,35 +710,300 @@ function randomU64(): bigint {
   return crypto.getRandomValues(new BigUint64Array(1))[0] ?? 0n;
 }
 
-// The outbound half of wasi:http/types. Runtimes that bind the whole interface,
-// such as componentize-py, reference these classes at instantiation. Without
-// `wasi:http/outgoing-handler` there's nothing to send a request with, so
-// constructing one fails with a clear message instead of a missing import.
+// wasi:http outbound requests. Runtimes that bind the whole of wasi:http/types,
+// such as componentize-py, reference these classes at instantiation even when
+// the route can't send a request.
 
-class OutboundUnsupported {
-  constructor() {
-    throw new Error("polyroute's embedded runtime doesn't support outbound HTTP requests yet.");
+export class RequestOptions {
+  #connectTimeout: bigint | undefined;
+  #firstByteTimeout: bigint | undefined;
+  #betweenBytesTimeout: bigint | undefined;
+
+  connectTimeout(): bigint | undefined {
+    return this.#connectTimeout;
+  }
+
+  setConnectTimeout(duration: bigint | undefined): void {
+    this.#connectTimeout = duration;
+  }
+
+  firstByteTimeout(): bigint | undefined {
+    return this.#firstByteTimeout;
+  }
+
+  setFirstByteTimeout(duration: bigint | undefined): void {
+    this.#firstByteTimeout = duration;
+  }
+
+  betweenBytesTimeout(): bigint | undefined {
+    return this.#betweenBytesTimeout;
+  }
+
+  setBetweenBytesTimeout(duration: bigint | undefined): void {
+    this.#betweenBytesTimeout = duration;
   }
 }
-class OutgoingRequest extends OutboundUnsupported {}
-class RequestOptions extends OutboundUnsupported {}
-class IncomingResponse {}
-class FutureIncomingResponse {}
+
+interface OutgoingRequestState {
+  method: Method;
+  pathWithQuery: string | undefined;
+  scheme: Scheme | undefined;
+  authority: string | undefined;
+  headers: Fields;
+  body: OutgoingBody | undefined;
+}
+
+let outgoingRequestState: (request: OutgoingRequest) => OutgoingRequestState;
+
+const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/;
+
+export class OutgoingRequest {
+  readonly #headers: Fields;
+  #method: Method = { tag: "get" };
+  #pathWithQuery: string | undefined;
+  #scheme: Scheme | undefined;
+  #authority: string | undefined;
+  #body: OutgoingBody | undefined;
+
+  constructor(headers: Fields) {
+    this.#headers = lockFields(headers);
+  }
+
+  body(): OutgoingBody {
+    if (this.#body !== undefined) throw undefined;
+    this.#body = new OutgoingBody();
+    return this.#body;
+  }
+
+  method(): Method {
+    return this.#method;
+  }
+
+  setMethod(method: Method): void {
+    if (method.tag === "other" && !TOKEN.test(method.val)) throw undefined;
+    this.#method = method;
+  }
+
+  pathWithQuery(): string | undefined {
+    return this.#pathWithQuery;
+  }
+
+  setPathWithQuery(pathWithQuery: string | undefined): void {
+    if (pathWithQuery !== undefined && /[\s#]/.test(pathWithQuery)) throw undefined;
+    this.#pathWithQuery = pathWithQuery;
+  }
+
+  scheme(): Scheme | undefined {
+    return this.#scheme;
+  }
+
+  setScheme(scheme: Scheme | undefined): void {
+    if (scheme?.tag === "other" && !SCHEME.test(scheme.val)) throw undefined;
+    this.#scheme = scheme;
+  }
+
+  authority(): string | undefined {
+    return this.#authority;
+  }
+
+  setAuthority(authority: string | undefined): void {
+    if (authority !== undefined && /[\s/?#@\\]/.test(authority)) throw undefined;
+    this.#authority = authority;
+  }
+
+  headers(): Fields {
+    return this.#headers;
+  }
+
+  static {
+    outgoingRequestState = (request) => ({
+      method: request.#method,
+      pathWithQuery: request.#pathWithQuery,
+      scheme: request.#scheme,
+      authority: request.#authority,
+      headers: request.#headers,
+      body: request.#body,
+    });
+  }
+}
+
+export class IncomingResponse {
+  readonly #status: number;
+  readonly #headers: Fields;
+  #body: Uint8Array | undefined;
+
+  constructor(response: OutboundResponse) {
+    const entries: Array<[string, Uint8Array]> = [];
+    for (const [name, value] of response.headers) {
+      if (!FORBIDDEN_HEADERS.has(name)) entries.push([name, latin1Encode(value)]);
+    }
+    this.#status = response.status;
+    this.#headers = lockFields(Fields.fromList(entries));
+    this.#body = response.body;
+  }
+
+  status(): number {
+    return this.#status;
+  }
+
+  headers(): Fields {
+    return this.#headers;
+  }
+
+  consume(): IncomingBody {
+    if (this.#body === undefined) throw undefined;
+    const body = new IncomingBody(this.#body);
+    this.#body = undefined;
+    return body;
+  }
+}
+
+type IncomingResponseResult = { tag: "ok"; val: IncomingResponse } | { tag: "err"; val: ErrorCode };
+
+function toIncomingResponse(result: OutboundResult): IncomingResponseResult {
+  if (result.tag === "err") return result;
+  try {
+    return { tag: "ok", val: new IncomingResponse(result.val) };
+  } catch {
+    return {
+      tag: "err",
+      val: { tag: "internal-error", val: "The response had a header the route can't receive." },
+    };
+  }
+}
+
+export class FutureIncomingResponse {
+  readonly #pending: Pending;
+  #result: IncomingResponseResult | undefined;
+  #taken = false;
+
+  constructor(result: OutboundResult | Promise<OutboundResult>) {
+    if (!(result instanceof Promise)) {
+      this.#result = toIncomingResponse(result);
+      this.#pending = { done: true, promise: Promise.resolve() };
+      return;
+    }
+    const pending: Pending = {
+      done: false,
+      promise: result.then(
+        (value) => {
+          this.#result = toIncomingResponse(value);
+          pending.done = true;
+        },
+        (error: unknown) => {
+          this.#result = { tag: "err", val: toErrorCode(error) };
+          pending.done = true;
+        },
+      ),
+    };
+    this.#pending = pending;
+  }
+
+  subscribe(): Pollable {
+    return new Pollable(undefined, true, this.#pending);
+  }
+
+  get(): { tag: "ok"; val: IncomingResponseResult } | { tag: "err"; val: undefined } | undefined {
+    if (!this.#pending.done) return undefined;
+    if (this.#taken) return { tag: "err", val: undefined };
+    this.#taken = true;
+    return { tag: "ok", val: this.#result! };
+  }
+}
+
+function whenBodySettled(sink: BodySink | undefined): boolean | Promise<boolean> {
+  if (sink === undefined || sink.finished) return true;
+  if (sink.dropped) return false;
+  return new Promise((resolve) => {
+    sink.onSettled = resolve;
+  });
+}
+
+const DROPPED_BODY: OutboundResult = {
+  tag: "err",
+  val: { tag: "internal-error", val: "The route dropped the request body without finishing it." },
+};
+
+function toOutboundUrl(state: OutgoingRequestState): URL | undefined {
+  const { scheme, authority, pathWithQuery = "/" } = state;
+  if (scheme?.tag === "other" || authority === undefined || authority === "") return undefined;
+  if (!pathWithQuery.startsWith("/")) return undefined;
+  const protocol = scheme?.tag === "HTTP" ? "http" : "https";
+  try {
+    return new URL(`${protocol}://${authority}${pathWithQuery}`);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `wasi:http/outgoing-handler#handle`. Every failure, including a denied
+ * host, comes back through the future: wstd traps if `handle` itself fails.
+ */
+function handleOutgoing(
+  outbound: OutboundContext | undefined,
+  request: OutgoingRequest,
+  options: RequestOptions | undefined,
+): FutureIncomingResponse {
+  const state = outgoingRequestState(request);
+  const url = toOutboundUrl(state);
+  if (url === undefined) {
+    return new FutureIncomingResponse({ tag: "err", val: { tag: "HTTP-request-URI-invalid" } });
+  }
+  if (outbound === undefined || !outbound.policy.allows(url)) {
+    return new FutureIncomingResponse({ tag: "err", val: { tag: "HTTP-request-denied" } });
+  }
+  const sink = state.body === undefined ? undefined : outgoingBodySink(state.body);
+  const send = (finished: boolean): OutboundResult | Promise<OutboundResult> => {
+    if (!finished) return DROPPED_BODY;
+    return sendOutbound(
+      {
+        method: state.method.tag === "other" ? state.method.val : state.method.tag.toUpperCase(),
+        url,
+        headers: state.headers.entries().map(([name, value]) => [name, latin1Decode(value)]),
+        body: sink?.bytes(),
+        connectTimeout: options?.connectTimeout(),
+        firstByteTimeout: options?.firstByteTimeout(),
+        betweenBytesTimeout: options?.betweenBytesTimeout(),
+      },
+      signal,
+    );
+  };
+  // The guest usually writes the body after `handle` returns, so the request
+  // is sent once the body is finished.
+  const signal = outbound.signal;
+  const settled = whenBodySettled(sink);
+  return new FutureIncomingResponse(
+    typeof settled === "boolean" ? send(settled) : settled.then(send),
+  );
+}
 
 // wasi:cli
 
 class TerminalInput {}
 class TerminalOutput {}
 
+export interface OutboundContext {
+  readonly policy: OutboundPolicy;
+  /** The signal of the request the guest is handling, aborted when it ends. */
+  signal: AbortSignal | undefined;
+}
+
 export interface HostContext {
   stdout: StreamSink;
   stderr: StreamSink;
+  /**
+   * Set for a route that imports `wasi:http/outgoing-handler`. polyroute
+   * transpiles such a route with JSPI, so its waits suspend instead of block.
+   */
+  outbound?: OutboundContext | undefined;
 }
 
 export type HostImports = Record<(typeof SUPPORTED_INTERFACES)[number], Record<string, unknown>>;
 
 /** Builds the import object for one instance. Classes are shared; sinks are per request. */
 export function createImports(context: HostContext): HostImports {
+  const suspends = context.outbound !== undefined;
   return {
     ...createDeniedImports(),
     "wasi:cli/environment": {
@@ -672,8 +1038,8 @@ export function createImports(context: HostContext): HostImports {
     "wasi:clocks/monotonic-clock": {
       now: monotonicNow,
       resolution: () => 1_000n,
-      subscribeInstant: (when: bigint) => new Pollable(when),
-      subscribeDuration: (duration: bigint) => new Pollable(monotonicNow() + duration),
+      subscribeInstant: (when: bigint) => new Pollable(when, suspends),
+      subscribeDuration: (duration: bigint) => new Pollable(monotonicNow() + duration, suspends),
     },
     "wasi:clocks/wall-clock": {
       now() {
@@ -706,6 +1072,10 @@ export function createImports(context: HostContext): HostImports {
       IncomingResponse,
       FutureIncomingResponse,
       httpErrorCode: (_error: IoError): ErrorCode | undefined => undefined,
+    },
+    "wasi:http/outgoing-handler": {
+      handle: (request: OutgoingRequest, options: RequestOptions | undefined) =>
+        handleOutgoing(context.outbound, request, options),
     },
   };
 }

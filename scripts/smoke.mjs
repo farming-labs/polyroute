@@ -33,10 +33,40 @@ async function prepareWorkspaceApp() {
   return { appDir: exampleDir, cleanup: async () => {} };
 }
 
+/**
+ * Fails unless the tarball ships every Python module and none of the bytecode
+ * caches that building a Python route writes next to them.
+ */
+async function checkPackedFiles(packOutput) {
+  const files = new Set(JSON.parse(packOutput).files.map((file) => file.path));
+  const modules = (await readdir(path.join(packageDir, "python")))
+    .filter((name) => name.endsWith(".py"))
+    .map((name) => `python/${name}`);
+  const problems = [
+    ...modules.filter((module) => !files.has(module)).map((module) => `${module} is missing`),
+    ...[...files]
+      .filter((file) => file.includes("__pycache__/"))
+      .map((file) => `${file} shouldn't be there`),
+  ];
+  if (problems.length > 0) {
+    throw new Error(
+      `The packed tarball is wrong: ${problems.join(", ")}. Check \`files\` in packages/polyroute/package.json.`,
+    );
+  }
+}
+
 async function preparePackedApp() {
   const workDir = await mkdtemp(path.join(tmpdir(), "polyroute-smoke-"));
   run("pnpm", ["--filter", "@farming-labs/polyroute", "build"], repo);
-  run("pnpm", ["pack", "--pack-destination", workDir], packageDir);
+  console.log(`$ pnpm pack --pack-destination ${workDir} --json  (in packages/polyroute)`);
+  const pack = spawnSync("pnpm", ["pack", "--pack-destination", workDir, "--json"], {
+    cwd: packageDir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+    shell: process.platform === "win32",
+  });
+  if (pack.status !== 0) throw new Error(`\`pnpm pack\` exited with ${pack.status}.`);
+  await checkPackedFiles(pack.stdout);
   const tarball = (await readdir(workDir)).find((file) => file.endsWith(".tgz"));
   if (tarball === undefined) throw new Error("pnpm pack produced no tarball.");
 
@@ -128,6 +158,20 @@ const checks = [
     status: 200,
     body: '{"slug":"hello-world-farm","text":"Hello World, Farm!"}\n',
   },
+  // The relay route sends a request, which needs JSPI (Node 24 and later).
+  // Without it, the route fails with UNSUPPORTED_RUNTIME and the server answers 500.
+  typeof WebAssembly.Suspending === "function"
+    ? {
+        name: "Rust route calls another route over HTTP",
+        path: "/api/relay",
+        status: 200,
+        body: '{"relayed":{"message":"Hello from TypeScript"}}',
+      }
+    : {
+        name: "Rust route that sends requests fails without JSPI",
+        path: "/api/relay",
+        status: 500,
+      },
   { name: "unknown path", path: "/api/missing", status: 404 },
 ];
 

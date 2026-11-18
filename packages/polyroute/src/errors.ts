@@ -11,10 +11,14 @@ export type PolyrouteErrorCode =
   | "CLIENT_IMPORT"
   /** The component imports an interface the embedded runtime doesn't provide. */
   | "UNSUPPORTED_IMPORT"
+  /** The route sends HTTP requests, but `outbound` isn't set. */
+  | "OUTBOUND_NOT_ALLOWED"
   /** The component doesn't export `wasi:http/incoming-handler`. */
   | "MISSING_HANDLER"
   /** The compiled route couldn't be instantiated. */
   | "ROUTE_INSTANTIATION_FAILED"
+  /** The route sends HTTP requests, and this JavaScript runtime has no JSPI. */
+  | "UNSUPPORTED_RUNTIME"
   /** The route trapped, for example because the Rust code panicked. */
   | "ROUTE_TRAPPED"
   /** The route returned without setting a response. */

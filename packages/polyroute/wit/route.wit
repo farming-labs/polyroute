@@ -1,8 +1,7 @@
 package polyroute:route;
 
 /// What a polyroute route can import and must export. It's `wasi:http/proxy`
-/// without `wasi:http/outgoing-handler`, which the embedded runtime doesn't
-/// provide yet.
+/// without `wasi:http/outgoing-handler`.
 world route {
   import wasi:io/poll@0.2.12;
   import wasi:io/error@0.2.12;
@@ -16,4 +15,12 @@ world route {
   import wasi:http/types@0.2.12;
 
   export wasi:http/incoming-handler@0.2.12;
+}
+
+/// A route that sends HTTP requests. componentize-py imports every interface
+/// in the world, so polyroute builds only the Python routes that send requests
+/// against this one.
+world outbound-route {
+  include route;
+  import wasi:http/outgoing-handler@0.2.12;
 }
