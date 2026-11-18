@@ -210,7 +210,11 @@ describe.each(["jco", "wasmtime"] as const)("%s outbound runtime", (runtime) => 
       expect(response.status).toBe(200);
       expect(response.headers.getSetCookie()).toEqual(["a=1", "b=2"]);
       expect(response.headers.get("content-encoding")).toBeNull();
-      expect(response.headers.get("content-length")).toBeNull();
+      expect(response.headers.get("x-upstream-content-length")).toBe("absent");
+      // wstd sets the new response's length from its decoded body.
+      expect(response.headers.get("content-length")).toBe(
+        String(Buffer.byteLength("decoded upstream")),
+      );
       expect(await response.text()).toBe("decoded upstream");
     });
 

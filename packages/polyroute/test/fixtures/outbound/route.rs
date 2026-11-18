@@ -70,7 +70,14 @@ async fn main(mut request: Request<IncomingBody>, responder: Responder) -> Finis
             let text = upstream.body_mut().bytes().await.unwrap_or_default();
             let mut builder = Response::builder()
                 .status(StatusCode::OK)
-                .header("x-upstream-status", status.as_u16().to_string());
+                .header("x-upstream-status", status.as_u16().to_string())
+                .header(
+                    "x-upstream-content-length",
+                    headers
+                        .get("content-length")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("absent"),
+                );
             for (name, value) in &headers {
                 if matches!(
                     name.as_str(),
