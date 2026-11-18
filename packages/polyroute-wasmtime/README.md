@@ -8,12 +8,13 @@ You don't import this package. polyroute loads it during `vite build` to compile
 
 - **It isn't published.** Build it from this repository: `pnpm --filter @farming-labs/polyroute-wasmtime build` runs `cargo build --release` and writes `polyroute-wasmtime.node`.
 - **It doesn't cross-compile.** It builds for, and compiles routes for, the machine it's built on. A server on another OS or architecture fails with `RUNTIME_UNAVAILABLE`.
-- **It doesn't send HTTP requests for routes.** polyroute's build rejects routes that import `wasi:http/outgoing-handler` when this runtime is on.
 
 ## How it works
 
 - `precompile(component)` compiles a component with wasmtime 50.0.2 and Cranelift, using the one engine configuration the addon has.
 - `new Route(path, options)` maps a `.cwasm` file into memory and links it against WASI 0.2 and `wasi:http`. wasmtime refuses a file that a different wasmtime version or configuration wrote.
 - `route.handle(method, url, headers, body)` serves one request synchronously on the calling thread. It returns the response, or names what went wrong, along with what the route wrote to stdout and stderr during the request.
+
+- `route.handleAsync(request, outbound)` runs an outbound guest on Tokio's blocking executor. Up to 32 requests per route run at once; further calls wait before occupying a worker. The callback runs on JavaScript and uses polyroute's existing HTTP host and allowlist. Completed calls release their callback, cancel unfinished upstream work, and return the instance to the pool unless it trapped or reached its reuse limit.
 
 Routes get no preopened directories, environment variables, or arguments, and sockets are denied.

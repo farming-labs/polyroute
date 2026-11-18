@@ -318,10 +318,10 @@ It's a prototype from [RFC 0001](https://github.com/farming-labs/polyroute/pull/
 - **It needs the addon.** Add `@farming-labs/polyroute-wasmtime` to the app. It isn't published yet, so build it in this repository with `pnpm --filter @farming-labs/polyroute-wasmtime build`, which needs Rust.
 - **It builds for this machine only.** The build writes each route's machine code to `polyroute/<hash>/<target>.cwasm`, and copies the addon to `polyroute/wasmtime/<target>.node`, next to the chunk that loads them. Deploy that folder to a server with the same OS and architecture. A server that can't load either file fails with `RUNTIME_UNAVAILABLE` on the route's first request. It never falls back to jco.
 - **Dev still uses jco.** Only `vite build` uses wasmtime.
-- **Routes that send requests aren't supported yet.** The build fails for a route that imports `wasi:http/outgoing-handler`, with `UNSUPPORTED_RUNTIME`.
-- **Everything else matches the default runtime.** [Instances](#instances) work the same way, including `"per-request"` and Go's limit of 1,000 requests per instance, and so does the [list of what a route can use](#what-a-route-can-use). Errors use the same codes, and a `ROUTE_TRAPPED` error carries the trapped request's stderr. Each request is one synchronous call into the addon, as it's one call into jco's bindings today.
+- **Outbound routes use native workers.** They call the same JavaScript HTTP host and enforce the same `outbound.allow` policy. They do not require JSPI, including on Node 22. At most 32 requests run per route at once, including in `"per-request"` mode; additional calls wait for a worker.
+- **Everything else matches the default runtime.** [Instances](#instances) work the same way, including `"per-request"` and Go's limit of 1,000 requests per instance, and so does the [list of what a route can use](#what-a-route-can-use). Errors use the same codes, and a `ROUTE_TRAPPED` error carries the trapped request's stderr. Routes without outbound imports make one synchronous call into the addon. [The outbound design](docs/decisions/0004-native-outbound-http.md) describes worker ownership and cancellation.
 
-Measured on the example app without its relay route, which this runtime can't build yet. Apple M1, Node 24.21.0, both builds alternating, median shown:
+Historical measurements from the prototype before outbound support, excluding its relay route. Apple M1, Node 24.21.0, both builds alternating, median shown:
 
 | Route                   | Cold start, jco | Cold start, wasmtime | Requests/s at 1 connection, jco → wasmtime | At 10 connections |
 | ----------------------- | --------------: | -------------------: | -----------------------------------------: | ----------------: |
@@ -405,7 +405,7 @@ node scripts/bench.mjs --server /path/to/native/server.js --baseline /path/to/jc
 node scripts/bench.mjs --server /path/to/native/server.js --baseline /path/to/jco/server.js --matched --cold --rounds 20 --json > /tmp/polyroute-cold.json
 ```
 
-Repeat throughput with `--connections 10`. Measure A/A noise by passing the same server file as both `--server` and `--baseline`. Each round reverses both the route and build order. `--json` writes a versioned report with every round, median throughput, median p50/p95/p99 request latency, cold-start median/p95, errors including warmup, and CPU, OS, Node, and load-average details. No samples are discarded. Keep raw reports outside the repository, report losses, and treat effects smaller than A/A variation as inconclusive. These commands fail for the current native runtime when they reach the unsupported outbound relay; omitting it does not satisfy native acceptance.
+Repeat throughput with `--connections 10`. Measure A/A noise by passing the same server file as both `--server` and `--baseline`. Each round reverses both the route and build order. `--json` writes a versioned report with every round, median throughput, median p50/p95/p99 request latency, cold-start median/p95, errors including warmup, and CPU, OS, Node, and load-average details. No samples are discarded. Keep raw reports outside the repository, report losses, and treat effects smaller than A/A variation as inconclusive. Include the outbound relay in both builds; omitting it does not satisfy native acceptance.
 
 The historical table below measures different workloads and cannot establish a language speedup:
 
@@ -451,7 +451,7 @@ So use polyroute when you want to write a route in another language and deploy i
 - A route that sleeps blocks the Node event loop while it sleeps, unless it [sends requests](#outbound-requests), which makes its timers suspend it instead.
 - Core modules deploy as files next to the server: about 19 MB for a Python route, 7 MB for a Go route, and 250 KB for a Rust route. A deploy that copies `server.js` without its `polyroute/` folder fails with `ROUTE_INSTANTIATION_FAILED` on each route's first request.
 - Each route bundles its own copy of jco's glue code, about 400 KB before compression.
-- `experimental.runtime: "wasmtime"` builds for the building machine only, doesn't support routes that send requests, and has only been measured on macOS arm64.
+- `experimental.runtime: "wasmtime"` builds for the building machine only and has only been measured on macOS arm64. Its earlier measurements predate outbound support.
 - The first build of each language is slow: Rust compiles wstd, and componentize-go downloads itself on first use. Later builds are incremental.
 - Tested on macOS arm64 with Node 24. Windows and Linux run in CI but haven't been verified by hand. Bun, Deno, and Cloudflare Workers are untested; Workers can't compile Wasm from bytes at runtime, so routes won't load there as-is.
 

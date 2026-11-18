@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { polyroute } from "../src/index.js";
 import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
-import { buildServerEntry, type BuiltEntry } from "./helpers.js";
+import { buildServerEntry, fixturesDir, type BuiltEntry } from "./helpers.js";
 import { createRouteProcess } from "./route-process.mjs";
 
 // The same fixtures as build.test.ts, built with `experimental.runtime:
@@ -293,19 +293,10 @@ describe("failing closed", () => {
     expect(await count(counter)).toBe(1);
   });
 
-  it("rejects a route that sends HTTP requests instead of running it in jco", async () => {
-    const failure = buildServerEntry(
-      "outbound-entry.ts",
-      path.join(outDir, "outbound"),
-      undefined,
-      {
-        ...wasmtime,
-        outbound: { allow: ["example.com"] },
-      },
-    );
-    await expect(failure).rejects.toThrow(
-      'PolyrouteError: `outbound/route.rs` sends HTTP requests (it imports `wasi:http/outgoing-handler`), which `experimental.runtime: "wasmtime"` doesn\'t support yet. Build it with the default runtime.',
-    );
+  it("denies outbound imports unless an allowlist is configured", async () => {
+    await expect(
+      buildServerEntry("outbound-entry.ts", path.join(outDir, "outbound"), fixturesDir, wasmtime),
+    ).rejects.toThrow("polyroute allows none by default");
   });
 
   it("rejects an `experimental.runtime` value it doesn't know, naming the accepted ones", () => {

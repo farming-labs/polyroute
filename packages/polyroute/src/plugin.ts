@@ -180,6 +180,7 @@ export function createWasmtimeRouteModule(
   precompiled: PrecompiledRoute,
   instances: InstanceMode,
   requestsPerInstance?: number,
+  outbound?: OutboundOptions,
 ): string {
   const url = (file: string) => `new URL(${JSON.stringify(`./${file}`)}, import.meta.url)`;
   return [
@@ -194,6 +195,7 @@ export function createWasmtimeRouteModule(
     `  target: ${JSON.stringify(precompiled.target)},`,
     `  addon: ${url(addonFile(precompiled.target))},`,
     `  component: ${url(machineCodeFile(precompiled))},`,
+    ...(outbound === undefined ? [] : [`  outbound: ${JSON.stringify(outbound)},`]),
     "});",
     "",
     ...ROUTE_EXPORTS,
@@ -282,12 +284,6 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
           { timestamp: true },
         );
         if (runtime === "wasmtime" && config.command === "build") {
-          if (transpiled.outbound) {
-            throw new PolyrouteError(
-              "UNSUPPORTED_RUNTIME",
-              `\`${label}\` sends HTTP requests (it imports \`wasi:http/outgoing-handler\`), which \`experimental.runtime: "wasmtime"\` doesn't support yet. Build it with the default runtime.`,
-            );
-          }
           const precompiled = await precompileRoute(wasm, label, cacheDir);
           builtRoutes.set(id, precompiled);
           return createWasmtimeRouteModule(
@@ -295,6 +291,7 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
             precompiled,
             instances,
             language.requestsPerInstance,
+            transpiled.outbound ? outbound : undefined,
           );
         }
         const coreModuleFiles = config.command === "build";

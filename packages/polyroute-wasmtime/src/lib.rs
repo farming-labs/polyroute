@@ -11,8 +11,13 @@ use std::task::{Context, Poll, Waker};
 use bytes::Bytes;
 use http_body::Body as _;
 use http_body_util::Full;
-use napi::bindgen_prelude::Buffer;
+use napi::Env;
+use napi::bindgen_prelude::{Buffer, PromiseRaw};
+use tokio::sync::Semaphore;
+
+mod outbound;
 use napi_derive::napi;
+use outbound::OutboundCallback;
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
@@ -145,19 +150,20 @@ impl tokio::io::AsyncWrite for Capture {
     }
 }
 
-struct Hooks;
+#[derive(Default)]
+struct Hooks {
+    outbound: Option<Arc<OutboundCallback>>,
+}
 
 impl WasiHttpHooks for Hooks {
     fn p2_outgoing_body_buffer_chunks(&mut self) -> usize {
         BODY_BUFFER_CHUNKS
     }
 
-    // The build rejects routes that import `wasi:http/outgoing-handler` for
-    // this runtime, so this only answers a guest that calls it anyway.
     fn send_request(
         &mut self,
-        _request: http::Request<WasiBody>,
-        _options: Option<RequestOptions>,
+        request: http::Request<WasiBody>,
+        options: Option<RequestOptions>,
         _fut: Box<dyn Future<Output = Result<(), HttpError>> + Send>,
     ) -> Box<
         dyn Future<
@@ -170,7 +176,13 @@ impl WasiHttpHooks for Hooks {
                 >,
             > + Send,
     > {
-        Box::new(async { Err(HttpError::HttpRequestDenied) })
+        let callback = self.outbound.clone();
+        Box::new(async move {
+            let response = outbound::send(callback, request, options).await?;
+            let finished: Box<dyn Future<Output = Result<(), HttpError>> + Send> =
+                Box::new(async { Ok(()) });
+            Ok((response, finished))
+        })
     }
 }
 
@@ -221,6 +233,14 @@ pub struct HandleResult {
 }
 
 #[napi(object)]
+pub struct HandleRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<String>,
+    pub body: Buffer,
+}
+
+#[napi(object)]
 pub struct RouteOptions {
     /// Gives every request a fresh instance instead of reusing one.
     pub per_request: bool,
@@ -228,9 +248,15 @@ pub struct RouteOptions {
     pub requests_per_instance: u32,
 }
 
-/// One route's precompiled component, linked once, and its reused instance.
+/// One route's precompiled component and its independently owned instances.
 #[napi]
 pub struct Route {
+    worker: Worker,
+    idle: Arc<Mutex<Vec<Worker>>>,
+    permits: Arc<Semaphore>,
+}
+
+struct Worker {
     engine: Engine,
     pre: ProxyPre<Host>,
     per_request: bool,
@@ -270,7 +296,7 @@ impl Route {
             .instantiate_pre(&component)
             .and_then(ProxyPre::new)
             .map_err(|error| napi::Error::from_reason(format!("{error:#}")))?;
-        Ok(Self {
+        let worker = Worker {
             engine: engine.clone(),
             pre,
             per_request: options.per_request,
@@ -278,7 +304,76 @@ impl Route {
             slot: None,
             stdout: Capture::default(),
             stderr: Capture::default(),
+        };
+        Ok(Self {
+            worker,
+            idle: Arc::default(),
+            permits: Arc::new(Semaphore::new(32)),
         })
+    }
+
+    /// Serves a route without outbound imports on the JavaScript thread.
+    #[napi]
+    pub fn handle(
+        &mut self,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        body: Buffer,
+    ) -> HandleResult {
+        self.worker
+            .handle(method, url, headers, body.to_vec(), None)
+    }
+
+    /// Owns its inputs before leaving JavaScript and never uses libuv's pool.
+    #[napi]
+    pub fn handle_async<'env>(
+        &self,
+        env: &'env Env,
+        request: HandleRequest,
+        outbound: OutboundCallback,
+    ) -> napi::Result<PromiseRaw<'env, HandleResult>> {
+        let HandleRequest {
+            method,
+            url,
+            headers,
+            body,
+        } = request;
+        let body = body.to_vec();
+        let fresh = self.worker.fresh();
+        let idle = self.idle.clone();
+        let permits = self.permits.clone();
+        env.spawn_future(async move {
+            let permit = permits
+                .acquire_owned()
+                .await
+                .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+            tokio::task::spawn_blocking(move || {
+                let mut worker = idle.lock().unwrap().pop().unwrap_or(fresh);
+                let result = worker.handle(method, url, headers, body, Some(Arc::new(outbound)));
+                idle.lock().unwrap().push(worker);
+                drop(permit);
+                result
+            })
+            .await
+            .map_err(|error| {
+                napi::Error::from_reason(format!("native route worker failed: {error}"))
+            })
+        })
+    }
+}
+
+impl Worker {
+    fn fresh(&self) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            pre: self.pre.clone(),
+            per_request: self.per_request,
+            requests_per_instance: self.requests_per_instance,
+            slot: None,
+            stdout: Capture::default(),
+            stderr: Capture::default(),
+        }
     }
 
     fn instantiate(&self) -> wasmtime::Result<Slot> {
@@ -295,7 +390,7 @@ impl Route {
             table: ResourceTable::new(),
             wasi,
             http: WasiHttpCtx::new(),
-            hooks: Hooks,
+            hooks: Hooks::default(),
         };
         let mut store = Store::new(&self.engine, host);
         let proxy = self.pre.instantiate(&mut store)?;
@@ -318,14 +413,13 @@ impl Route {
         }
     }
 
-    /// Serves one request. Runs synchronously on the calling thread.
-    #[napi]
-    pub fn handle(
+    fn handle(
         &mut self,
         method: String,
         url: String,
         headers: Vec<String>,
-        body: Buffer,
+        body: Vec<u8>,
+        outbound: Option<Arc<OutboundCallback>>,
     ) -> HandleResult {
         let mut slot = match self.slot.take() {
             Some(slot) => slot,
@@ -345,6 +439,7 @@ impl Route {
             }
         };
 
+        slot.store.data_mut().hooks.outbound = outbound;
         let response: Arc<Mutex<Option<Result<http::Response<HyperOutgoingBody>, ErrorCode>>>> =
             Arc::default();
         let call = (|| -> wasmtime::Result<()> {
@@ -364,6 +459,7 @@ impl Route {
                 .call_handle(&mut slot.store, incoming, outparam)
         })();
 
+        slot.store.data_mut().hooks.outbound = None;
         if let Err(error) = call {
             // A trapped instance can't be trusted or called again, so it's
             // dropped here and the next request gets a new one.
@@ -408,14 +504,14 @@ fn build_request(
     method: &str,
     url: &str,
     headers: &[String],
-    body: Buffer,
+    body: Vec<u8>,
 ) -> Result<http::Request<Full<Bytes>>, String> {
     let mut builder = http::Request::builder().method(method).uri(url);
     for pair in headers.chunks_exact(2) {
         builder = builder.header(pair[0].as_str(), latin1_bytes(&pair[1]));
     }
     builder
-        .body(Full::new(Bytes::from(Vec::from(body))))
+        .body(Full::new(Bytes::from(body)))
         .map_err(|error| error.to_string())
 }
 

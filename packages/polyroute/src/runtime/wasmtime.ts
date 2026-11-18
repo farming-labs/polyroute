@@ -2,6 +2,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { PolyrouteError } from "../errors.js";
 import type { FetchHandler, InstanceMode, WasiHttpRoute } from "./index.js";
+import { createOutboundPolicy, type OutboundOptions } from "./outbound.js";
+import { createNativeOutbound } from "./wasmtime-outbound.js";
 import {
   STDERR_TAIL_LINES,
   assertFinalStatus,
@@ -33,6 +35,10 @@ interface HandleResult {
 
 interface AddonRoute {
   handle(method: string, url: string, headers: string[], body: Uint8Array): HandleResult;
+  handleAsync(
+    request: { method: string; url: string; headers: string[]; body: Uint8Array },
+    outbound: ReturnType<typeof createNativeOutbound>,
+  ): Promise<HandleResult>;
 }
 
 interface Addon {
@@ -55,6 +61,8 @@ export interface WasmtimeHandlerOptions {
   instances?: InstanceMode;
   /** Replaces a reused instance after this many requests. Defaults to no limit. */
   requestsPerInstance?: number;
+  /** Only set for components that import outbound HTTP. */
+  outbound?: OutboundOptions;
 }
 
 const EMPTY = new Uint8Array(0);
@@ -83,8 +91,8 @@ function logLines(bytes: Uint8Array, log: (line: string) => void): string[] {
 
 /**
  * Serves a route from machine code that `vite build` compiled with wasmtime,
- * through the Node-API addon it copied next to the bundle. Each request is one
- * synchronous call into the addon, like a call into a jco-transpiled route.
+ * through the Node-API addon it copied next to the bundle. Outbound routes run
+ * on native workers so the JavaScript HTTP host can make progress while they wait.
  */
 export function createWasmtimeHandler(options: WasmtimeHandlerOptions): WasiHttpRoute {
   const { route, requestsPerInstance = Infinity } = options;
@@ -98,6 +106,8 @@ export function createWasmtimeHandler(options: WasmtimeHandlerOptions): WasiHttp
     );
   }
   const perRequest = (options.instances ?? "reuse") === "per-request";
+  const policy =
+    options.outbound === undefined ? undefined : createOutboundPolicy(options.outbound);
   let loaded: AddonRoute | undefined;
 
   // Loaded on the first request, like core modules, so a server whose files
@@ -128,7 +138,20 @@ export function createWasmtimeHandler(options: WasmtimeHandlerOptions): WasiHttp
     const headers: string[] = [];
     request.headers.forEach((value, name) => headers.push(name, value));
 
-    const result = handler.handle(request.method, request.url, headers, body);
+    let result: HandleResult;
+    if (policy === undefined) {
+      result = handler.handle(request.method, request.url, headers, body);
+    } else {
+      const controller = new AbortController();
+      try {
+        result = await handler.handleAsync(
+          { method: request.method, url: request.url, headers, body },
+          createNativeOutbound(policy, controller.signal),
+        );
+      } finally {
+        controller.abort(new Error("The route finished handling the request."));
+      }
+    }
     logLines(result.stdout, (line) => console.log(line));
     const stderr = logLines(result.stderr, (line) => console.error(line));
 

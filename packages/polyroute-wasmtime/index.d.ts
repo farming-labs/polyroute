@@ -32,11 +32,35 @@ export interface HandleResult {
   stderr: Buffer;
 }
 
+export interface OutboundRequest {
+  method: string;
+  url: string;
+  headers: string[];
+  body: Buffer;
+  /** Decimal strings preserve WASI's u64 nanoseconds. */
+  connectTimeoutNs?: string | null;
+  firstByteTimeoutNs?: string | null;
+  betweenBytesTimeoutNs?: string | null;
+}
+
+export interface OutboundResponse {
+  status: number;
+  headers: string[];
+  body: Buffer;
+  error?: string | null;
+  message?: string | null;
+}
+
 export declare class Route {
   /** Maps a `.cwasm` that `precompile` from this same addon wrote. */
   constructor(path: string, options: RouteOptions);
   /** Serves one request, synchronously, on the calling thread. */
   handle(method: string, url: string, headers: string[], body: Buffer): HandleResult;
+  /** Runs an outbound route on a native worker, with at most 32 calls in flight. */
+  handleAsync(
+    request: { method: string; url: string; headers: string[]; body: Buffer },
+    outbound: (request: OutboundRequest) => Promise<OutboundResponse>,
+  ): Promise<HandleResult>;
 }
 
 export interface Addon {
