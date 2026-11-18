@@ -1,0 +1,12 @@
+**
+!probes/
+!probes/lambda/
+!probes/lambda/Cargo.toml
+!probes/lambda/Cargo.lock
+!probes/lambda/policy-cases.json
+!probes/lambda/src/
+!probes/lambda/src/*.rs
+!packages/
+!packages/polyroute-wasmtime/
+!packages/polyroute-wasmtime/src/
+!packages/polyroute-wasmtime/src/python_http.rs
