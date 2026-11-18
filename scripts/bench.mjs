@@ -16,6 +16,7 @@ import { cpus } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { measureColdStart } from "./cold-start.mjs";
 
 const repo = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const { values: flags } = parseArgs({
@@ -181,15 +182,11 @@ if (flags.cold) {
     for (const route of routes) {
       const order = round % 2 === 1 ? builds : [...builds].reverse();
       for (const build of order) {
-        const started = performance.now();
-        const { child, origin } = startServer(build.file);
-        let ok;
-        try {
-          ok = await request(await origin, route);
-        } finally {
-          await stopServer(child);
-        }
-        const ms = performance.now() - started;
+        const { ok, ms } = await measureColdStart({
+          start: () => startServer(build.file),
+          request: (origin) => request(origin, route),
+          stop: stopServer,
+        });
         if (!ok) {
           console.error(`${build.label}: ${route.name} didn't answer 200 with the expected body.`);
           process.exit(1);

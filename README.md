@@ -412,7 +412,9 @@ Reusing the instance removes the biggest cost, which grew with the component: 25
 
 ### Cold start
 
-`node scripts/bench.mjs --cold` starts a new server for every sample and times its first response, which is what the first request to a serverless instance pays:
+`node scripts/bench.mjs --cold` starts a new server for every sample and times its first verified response. The timer stops before process cleanup. This measures local process startup, not a deployed provider's scheduling, download, or initialization time.
+
+The historical cold-start measurements below and in the experimental runtime section used a timer that also included process shutdown. They need to be rerun with the corrected timer before using them to judge the native runtime's acceptance criteria.
 
 | Route                   | Core modules inlined (before) | Core modules as files |
 | ----------------------- | ----------------------------: | --------------------: |
