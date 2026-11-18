@@ -80,8 +80,8 @@ pub async fn send(
             "outbound headers must be name/value pairs".into(),
         )));
     }
-    for pair in response.headers.chunks_exact(2) {
-        builder = builder.header(pair[0].as_str(), latin1_bytes(&pair[1]));
+    for [name, value] in response.headers.as_chunks::<2>().0 {
+        builder = builder.header(name.as_str(), latin1_bytes(value));
     }
     builder
         .body(

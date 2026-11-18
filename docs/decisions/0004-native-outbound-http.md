@@ -1,6 +1,6 @@
 # 0004: Run native outbound routes off the JavaScript thread
 
-Status: proposed, 2026-11-18. Implementation and verification are pending.
+Status: implemented in the draft prototype, 2026-11-18. Native integration and acceptance verification are pending.
 
 ## Problem
 

@@ -295,7 +295,7 @@ async def GET(request: Request) -> Response:
 
 `polyroute_fetch` is built on componentize-py's bundled `poll_loop`, and polyroute runs async handlers on its event loop. componentize-py puts every interface in the world into the component, whether the code uses it or not, so polyroute builds a Python route with `wasi:http/outgoing-handler` only when one of its files imports `polyroute_fetch` or `poll_loop`. `urllib` and `requests` open sockets, which polyroute denies.
 
-While a route waits for a response, the rest of the server keeps running. polyroute transpiles a route that imports `wasi:http/outgoing-handler` with [JSPI](https://v8.dev/blog/jspi), which lets V8 suspend the route's WebAssembly while JavaScript awaits a `fetch`. Its timers suspend it the same way. Routes that don't send requests are transpiled and run exactly as before. [docs/decisions/0003-outbound-http-with-jspi.md](docs/decisions/0003-outbound-http-with-jspi.md) explains the design.
+While a route waits for a response, the rest of the server keeps running. By default, polyroute transpiles a route that imports `wasi:http/outgoing-handler` with [JSPI](https://v8.dev/blog/jspi), which lets V8 suspend the route's WebAssembly while JavaScript awaits a `fetch`. Its timers suspend it the same way. Routes that don't send requests are transpiled and run exactly as before. [docs/decisions/0003-outbound-http-with-jspi.md](docs/decisions/0003-outbound-http-with-jspi.md) explains the design.
 
 - **It needs Node 24 or later.** Node 22 has no JSPI, so there a route that sends requests fails with `UNSUPPORTED_RUNTIME`, and every other route keeps working.
 - **It costs more than `fetch` from TypeScript.** Forwarding one request used 228 µs of CPU in a Rust route, 453 µs in Go, and 473 µs in Python, against 59 µs for a TypeScript handler calling `fetch`. With 10 requests in flight, they served 5,308, 2,412, and 2,348 requests/s, against 19,004. The `fetch` underneath costs the same either way. The difference is the route itself: its WebAssembly, more than 45 host calls through jco's glue, and the promises around the wait. Suspending and resuming costs about a microsecond. Measured in-process against a local server on an Apple M1 with Node 24.21.0, median of 30 interleaved rounds. `pnpm bench` measures the example's relay route over HTTP.
@@ -471,3 +471,5 @@ pnpm bench          # measure every route of the example's production build
 ## License
 
 MIT. The WASI interface files in [`packages/polyroute/wit/deps`](packages/polyroute/wit/deps) are Apache-2.0 WITH LLVM-exception.
+
+The example selects the native runtime with `pnpm --filter polyroute-example-polyglot build --mode wasmtime`. After building the addon, run `pnpm smoke --runtime wasmtime` and `pnpm smoke:packed --runtime wasmtime` to check every route, including relay, with the workspace and packed packages.

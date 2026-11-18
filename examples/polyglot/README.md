@@ -40,3 +40,5 @@ pnpm --filter polyroute-example-polyglot start
 ```
 
 `src/app.ts` is the router, `src/server.ts` the production entry, and `dev.js` the dev server. The Go route has its own `go.mod`, because componentize-go builds from the module root.
+
+For the experimental native runtime, build the addon from the repository root with `pnpm --filter @farming-labs/polyroute-wasmtime build`, then build this example with `pnpm build --mode wasmtime`. It uses the same routes and outbound allowlist. Run the root `pnpm smoke --runtime wasmtime` and `pnpm smoke:packed --runtime wasmtime` commands to check both package layouts.

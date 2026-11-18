@@ -41,6 +41,8 @@ const WASMTIME_VERSION: &str = env!("POLYROUTE_WASMTIME_VERSION");
 /// reader that can't run until the call returns.
 const BODY_BUFFER_CHUNKS: usize = 1 << 16;
 
+type GuestResponse = Result<http::Response<HyperOutgoingBody>, ErrorCode>;
+
 fn engine() -> napi::Result<&'static Engine> {
     static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
     ENGINE
@@ -440,8 +442,7 @@ impl Worker {
         };
 
         slot.store.data_mut().hooks.outbound = outbound;
-        let response: Arc<Mutex<Option<Result<http::Response<HyperOutgoingBody>, ErrorCode>>>> =
-            Arc::default();
+        let response: Arc<Mutex<Option<GuestResponse>>> = Arc::default();
         let call = (|| -> wasmtime::Result<()> {
             let mut http = slot.store.data_mut().http();
             let scheme = if url.starts_with("https:") {
@@ -507,8 +508,8 @@ fn build_request(
     body: Vec<u8>,
 ) -> Result<http::Request<Full<Bytes>>, String> {
     let mut builder = http::Request::builder().method(method).uri(url);
-    for pair in headers.chunks_exact(2) {
-        builder = builder.header(pair[0].as_str(), latin1_bytes(&pair[1]));
+    for [name, value] in headers.as_chunks::<2>().0 {
+        builder = builder.header(name.as_str(), latin1_bytes(value));
     }
     builder
         .body(Full::new(Bytes::from(body)))
