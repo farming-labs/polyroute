@@ -1,6 +1,6 @@
 # 0018: Serve the standalone native host as a Vercel executable function
 
-Status: proposed, 2026-11-18. Private probe only. No public deployment target, provider deployment, or provider measurement.
+Status: implemented as a private probe, 2026-11-18. Linux bridge checks pass; Build Output packaging verification is pending after a directory-creation fix. No public deployment target, provider deployment, or provider measurement.
 
 ## Problem and scope
 
@@ -28,3 +28,9 @@ This doesn't change the published packages or public options. A later production
 Run Rust formatting, Clippy and tests for both binaries. Run the shared guest cases from `cases.mjs` against the real Vercel binary over HTTP, with a local unix-socket server standing in for Vercel's bridge. Require a `server-started` message before the first request and one `end` message per request, keyed by the request's invocation and request IDs. Cover startup failure before readiness and shutdown on `SIGTERM`. Re-run the Lambda probe's protocol suite to show the shared route layer didn't change its behavior. Linux packaging follows the Lambda probe's pinned Amazon Linux build.
 
 Deploying needs a Vercel project and the user's explicit approval. Only a deployed, matched comparison against an equivalent TypeScript function can establish provider cold-start or req/s results.
+
+## Verification evidence
+
+[CI run 44374971737](https://github.com/farming-labs/polyroute/actions/runs/44374971737) built both binaries on Amazon Linux and passed formatting, Clippy, seven Lambda Rust tests and six Vercel Rust tests. The Lambda protocol fixture passed 23 groups and 1,103 invocations; the AWS emulator passed twenty groups and 1,101 invocations. The Vercel bridge passed 24 groups and 1,103 requests, with one matching end message per request. Its non-Latin-1 HTTP-header case is skipped, not passed.
+
+The job then failed before writing the Build Output: `mkdir` returned `ENOENT` because the requested output's parent directory did not exist. The packager now creates missing parents but still requires the output directory itself to be new. Its Vite import uses a file URL so the packaging tests can also run on Windows. The real-filesystem regression reproduces `ENOENT` before the fix and passes afterward; a separate test verifies that an existing output and its contents remain untouched. These tests use synthetic ELF/component bytes and establish packaging behavior only. Both pass locally on Node 22.13.0 and Node 24.21.0; all fourteen script tests pass on Node 24.21.0. The updated Linux artifact and Windows checks remain pending.

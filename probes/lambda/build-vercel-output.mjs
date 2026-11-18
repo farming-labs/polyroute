@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const probe = fileURLToPath(new URL(".", import.meta.url));
@@ -32,7 +32,7 @@ const routes = [
 assert.deepEqual(Object.keys(fixtures).sort(), routes.map((route) => route.native).sort());
 
 const require = createRequire(path.join(repo, "packages/polyroute/package.json"));
-const { transformWithOxc } = await import(require.resolve("vite"));
+const { transformWithOxc } = await import(pathToFileURL(require.resolve("vite")).href);
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const files = [];
 
@@ -48,6 +48,7 @@ async function write(file, bytes, mode = 0o644) {
   });
 }
 
+await mkdir(path.dirname(output), { recursive: true });
 await mkdir(output);
 await write(path.join(output, "config.json"), JSON.stringify({ version: 3 }, null, 2) + "\n");
 for (const route of routes) {
