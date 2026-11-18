@@ -27,7 +27,7 @@ def package(host, fixtures, output):
         route_id = route.rsplit("/route.", 1)[0].replace("/", "-")
         if not route_id or any(c not in "abcdefghijklmnopqrstuvwxyz-" for c in route_id):
             raise ValueError(f"invalid route name: {route}; use a known fixture")
-        modes = [False, True] if route in ["counter/route.rs", "go/counter/route.go", "python/response/route.py"] else [False]
+        modes = [False, True] if route in ["counter/route.rs", "echo/route.rs", "go/counter/route.go", "python/response/route.py"] else [False]
         configurations = [(mode, allow) for mode in modes for allow in ([False, True] if "outbound/" in route else [False])]
         for per_request, allow in configurations:
             name = route_id + ("-per-request" if per_request else "-reuse") + ("-outbound" if allow else "")

@@ -1,6 +1,6 @@
 # 0015: Verify the native Lambda artifact on Amazon Linux
 
-Status: private probe and Linux CI verification implemented, 2026-11-18; the first Linux run is pending. No Linux artifact or provider measurement is verified yet.
+Status: private Linux host and protocol checks passed, 2026-11-18; the first emulator run exposed a missing package variant. Its fix requires another CI run. No provider measurement is verified yet.
 
 ## Problem and scope
 
@@ -42,3 +42,9 @@ The checked-in probe builds with the locked dependencies and reuses `packages/po
 `python3 probes/lambda/package_test.py` passes three filesystem/archive tests: exact extracted bytes and modes, relative manifest and Go reuse policy, changed-component rejection, and rejection of a non-ELF host. Its synthetic ELF input is a packaging unit fixture, not an executable or platform test. JavaScript formatting/lint and syntax checks pass.
 
 Preparing fresh local fixtures failed with `ENOSPC` in componentization and the atomic transpilation-cache write. The failed log and temporary output remain retained. After recovering 136,073,004 bytes by verified compression, one retry completed componentization but again exhausted space while writing the final `.cwasm` bundle; that failure is retained separately. The compressed files are completed profile reports and copied generator binaries, with recorded SHA-256 verification and restore instructions; they are separate from these build inputs. The existing-component protocol result is not a fresh-fixture preparation claim. Linux CI must verify the new preparation command, real ELF host, extracted packages and AWS emulator before this milestone can pass.
+
+## First Linux run and package correction
+
+[Run 44353064591](https://github.com/farming-labs/polyroute/actions/runs/44353064591), at `12f203ea168d09b6ac75bf0d39de5735ba66145e`, prepared all seven fresh guest fixtures, built the real host in the pinned Amazon Linux image, passed formatting/Clippy and seven Rust tests, and passed all 23 SDK protocol groups with 1,103 result posts. It verified 13 extracted archives. The emulator passed 19 groups and failed one before invocation: the Rust echo fixture had no package with `perRequest: true`. The 1,100 executed invocations do not include that missing case. The failed result and container logs are retained in artifact `14449532887` and the job log.
+
+The package builder now includes both execution modes for Rust echo, producing 14 archives for this fixture set. A filesystem regression test requires both manifests and the unchanged Rust reuse limit; it fails against the original builder and passes with the added variant. `python3 probes/lambda/package_test.py` now passes four tests. The emulator case and its assertions remain unchanged. A new complete Linux run is still required; neither this correction nor the partial emulator result establishes provider performance.

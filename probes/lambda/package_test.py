@@ -44,6 +44,16 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "component changed"):
             packager.package(self.host, self.fixtures, self.root / "output")
 
+    def test_echo_is_packaged_for_reuse_and_per_request_execution(self):
+        fixtures = {"echo/route.rs": self.fixtures["go/counter/route.go"]}
+        packages = packager.package(self.host, fixtures, self.root / "output")
+        self.assertEqual({item["perRequest"] for item in packages}, {False, True})
+        self.assertEqual(len(packages), 2)
+        for item in packages:
+            manifest = json.loads((self.root / "output" / item["directory"] / "manifest.json").read_text())
+            self.assertEqual(manifest["perRequest"], item["perRequest"])
+            self.assertEqual(manifest["requestsPerInstance"], 0)
+
     def test_wrong_host_is_rejected(self):
         self.host.write_bytes(b"not ELF")
         with self.assertRaisesRegex(ValueError, "ELF"):
