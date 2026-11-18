@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
 import { buildServerEntry, fixturesDir } from "./helpers.js";
@@ -29,6 +30,8 @@ describe.each(["jco", "wasmtime"] as const)("%s outbound runtime", (runtime) => 
   let base: string;
   const received: string[] = [];
   let gathering: Array<() => void> = [];
+  let abandonedArrived = false;
+  let releaseAck: (() => void) | undefined;
 
   beforeAll(async () => {
     upstream = http.createServer(async (request, response) => {
@@ -36,6 +39,41 @@ describe.each(["jco", "wasmtime"] as const)("%s outbound runtime", (runtime) => 
       for await (const chunk of request) body += chunk;
       received.push(`${request.method} ${request.url}`);
       const url = new URL(request.url ?? "/", "http://upstream");
+      if (url.pathname === "/abandoned") {
+        response.once("close", () => upstream.emit("abandoned-closed"));
+        abandonedArrived = true;
+        releaseAck?.();
+        return;
+      }
+      if (url.pathname === "/ack") {
+        if (!abandonedArrived)
+          await new Promise<void>((resolve) => {
+            releaseAck = resolve;
+          });
+        response.end();
+        return;
+      }
+      if (url.pathname === "/no-headers") return;
+      if (url.pathname === "/stall-body") {
+        response.writeHead(200);
+        response.write("pending");
+        return;
+      }
+      if (url.pathname === "/gzip") {
+        const encoded = gzipSync("decoded upstream");
+        response.writeHead(201, {
+          "content-encoding": "gzip",
+          "content-length": encoded.length,
+          "set-cookie": ["a=1", "b=2"],
+        });
+        response.end(encoded);
+        return;
+      }
+      if (url.pathname === "/redirect") {
+        response.writeHead(302, { location: `${base.replace("127.0.0.1", "localhost")}/denied` });
+        response.end();
+        return;
+      }
       if (url.pathname === "/gather") {
         // Answers only once `n` requests are waiting here, so a test that sends
         // `n` at once finishes only if they're in flight at the same time.
@@ -161,6 +199,57 @@ describe.each(["jco", "wasmtime"] as const)("%s outbound runtime", (runtime) => 
         Array.from({ length: 3 }, () => "GET /gather?n=3 x-sent-by=python body=").join("\n"),
       );
     });
+  });
+
+  describe.runIf(canSend)("Rust outbound host conformance", () => {
+    const call = (headers: Record<string, string>) =>
+      routes.rust.fetch(new Request("http://localhost/", { headers }));
+
+    it("preserves duplicate cookies and describes the decoded response body", async () => {
+      const response = await call({ "x-upstream": `${base}/gzip` });
+      expect(response.status).toBe(200);
+      expect(response.headers.getSetCookie()).toEqual(["a=1", "b=2"]);
+      expect(response.headers.get("content-encoding")).toBeNull();
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(await response.text()).toBe("decoded upstream");
+    });
+
+    it("returns redirects without contacting a denied destination", async () => {
+      const before = received.length;
+      const response = await call({ "x-upstream": `${base}/redirect` });
+      expect(response.headers.get("x-upstream-status")).toBe("302");
+      expect(response.headers.get("location")).toBe(
+        `${base.replace("127.0.0.1", "localhost")}/denied`,
+      );
+      expect(received.slice(before)).toEqual(["GET /redirect"]);
+    });
+
+    it.each([
+      ["/no-headers", "x-first-byte-timeout-ms"],
+      ["/stall-body", "x-between-bytes-timeout-ms"],
+    ])("enforces the guest's timeout for %s", async (pathname, option) => {
+      const response = await call({ "x-upstream": `${base}${pathname}`, [option]: "10" });
+      expect(response.status).toBe(502);
+      expect(await response.text()).toContain("ConnectionReadTimeout");
+    });
+
+    it.each(["return", "trap"])(
+      "cancels abandoned upstream work after a guest %s",
+      async (mode) => {
+        abandonedArrived = false;
+        releaseAck = undefined;
+        const closed = once(upstream, "abandoned-closed");
+        const pending = call({ "x-upstream": base, "x-abandon": mode });
+        if (mode === "trap") {
+          await expect(pending).rejects.toMatchObject({ code: "ROUTE_TRAPPED" });
+        } else {
+          expect(await (await pending).text()).toBe("finished");
+        }
+        await closed;
+        const next = await call({ "x-upstream": `${base}/echo` });
+        expect(await next.text()).toBe("GET /echo x-sent-by=rust body=");
+      },
+    );
   });
 
   describe.runIf(canSend)("timers in a route that sends requests", () => {
