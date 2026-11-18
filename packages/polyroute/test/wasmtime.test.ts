@@ -1,12 +1,12 @@
 import { mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { polyroute } from "../src/index.js";
 import { GO_REQUESTS_PER_INSTANCE } from "../src/languages/go.js";
 import type { WasiHttpRoute } from "../src/runtime/index.js";
 import { buildServerEntry, type BuiltEntry } from "./helpers.js";
+import { createRouteProcess } from "./route-process.mjs";
 
 // The same fixtures as build.test.ts, built with `experimental.runtime:
 // "wasmtime"`. These tests need the addon: `pnpm --filter
@@ -33,6 +33,7 @@ async function count(route: WasiHttpRoute, path = "/"): Promise<number> {
 let outDir: string;
 let built: BuiltEntry;
 let routes: ServerEntry;
+const server = createRouteProcess();
 
 beforeAll(async () => {
   outDir = await mkdtemp(path.join(tmpdir(), "polyroute-wasmtime-"));
@@ -42,10 +43,11 @@ beforeAll(async () => {
     undefined,
     wasmtime,
   );
-  routes = (await import(pathToFileURL(built.file).href)) as ServerEntry;
+  routes = (await server.load(built.file)) as ServerEntry;
 });
 
 afterAll(async () => {
+  await server.close();
   await rm(outDir, { recursive: true, force: true });
 });
 
@@ -178,7 +180,7 @@ describe('instances: "per-request" in wasmtime', () => {
       undefined,
       { ...wasmtime, instances: "per-request" },
     );
-    perRequest = (await import(pathToFileURL(entry.file).href)) as typeof perRequest;
+    perRequest = (await server.load(entry.file)) as typeof perRequest;
   });
 
   it("gives every request a fresh instance, so no state survives a request", async () => {
@@ -271,7 +273,7 @@ describe("failing closed", () => {
       undefined,
       wasmtime,
     );
-    const { counter } = (await import(pathToFileURL(entry.file).href)) as {
+    const { counter } = (await server.load(entry.file)) as {
       counter: WasiHttpRoute;
     };
     const files = path.join(path.dirname(entry.file), "polyroute");
