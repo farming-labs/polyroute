@@ -1,6 +1,6 @@
 # RFC 0001: Compile routes ahead of time and run them natively
 
-Status: proposed, 2026-11-16
+Status: proposed, 2026-11-16. Prototype and measurement status updated 2026-11-18.
 
 ## Summary
 
@@ -14,6 +14,14 @@ Standalone native functions with no Node process are listed under [Future work](
 ## Goal
 
 A Rust, Go, or Python route should be able to replace a TypeScript API route on serverless. That means it starts about as fast and adds little per-request overhead. When it does real work, it should be faster.
+
+The broader performance goal is to beat matched TypeScript workloads in requests per second and cold start on serverless. Beating jco alone does not prove that goal. The benchmark must run equivalent TypeScript algorithms and payloads, and report workloads where native execution loses.
+
+## Measurement correction
+
+The cold-start tables below are historical, not current acceptance evidence. The existing `bench --cold` timer included process shutdown after the first response. [PR #23](https://github.com/farming-labs/polyroute/pull/23) corrects that timer and adds a regression test that fails with the old mechanism. Rerun the cold comparisons before deciding whether either part meets its timing target. Earlier standalone and kernel measurements also need reproduction under the new matched protocol before making a serverless performance claim.
+
+Local process startup does not measure a provider's scheduling, artifact download, or initialization overhead. Provider cold-start claims require a named deployment target and measurements from that deployment.
 
 ## Where the time goes today
 
@@ -117,6 +125,19 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 ## Part 2: `experimental.runtime: "wasmtime"`
 
+### Prototype status
+
+[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the building machine and emits the addon and precompiled components beside the server. The default runtime remains jco. No new performance win or completed acceptance is claimed yet.
+
+The prototype differs from the proposed end state below:
+
+- `experimental.targets`, cross-compilation, prebuilt distribution, and a compiler-free deployment addon are not implemented. The private addon currently includes Cranelift for build-time compilation.
+- Development still uses jco and reports this explicitly. Native development parity remains unimplemented.
+- Routes without outbound imports use the synchronous Node-API path. Outbound routes use Tokio workers and call the existing JavaScript HTTP host, enforcing its allowlist and cancellation. At most 32 requests per route run concurrently; excess calls wait. This also bounds native per-request mode.
+- Outbound Rust, Go, and Python integration passed on macOS with Node 24 at implementation commit `2f48eed`. The complete native workspace/packed smoke and cross-platform checks are still being verified. Passing these checks is separate from the throughput and cold-start acceptance below.
+
+The proposed configuration and packaging below describe remaining design work; they are not currently supported APIs.
+
 ### Configuration
 
 ```ts
@@ -152,7 +173,7 @@ For each route and each target, `vite build` calls `Engine::precompile_component
 
 - The same `PolyrouteError` codes apply. `ROUTE_TRAPPED` carries the trapped request's stderr, as it does today.
 - A new code, `RUNTIME_UNAVAILABLE`, covers a missing addon, a missing `.cwasm` for the host, or a version mismatch. Its message names `experimental.targets` and the host's target triple.
-- Capabilities don't change. There are no preopened directories, sockets are denied, and outbound HTTP follows the same allowlist as the jco runtime. That allowlist is in progress on `feat/outbound-http`, and here it would be enforced through wasmtime-wasi-http's request hooks.
+- Capabilities don't change. There are no preopened directories, sockets are denied, and outbound HTTP follows the same allowlist as the jco runtime. The jco allowlist has landed. The native prototype enforces it through wasmtime-wasi-http request hooks and the same JavaScript HTTP host.
 
 ### Safety
 
@@ -171,7 +192,9 @@ Part 2 stays experimental until a prototype clears all of these on macOS arm64 a
 - `pnpm smoke` and `pnpm smoke:packed` pass with the runtime enabled.
 - The function fits the platforms' size limits (Vercel: 250 MB unzipped).
 
-If the prototype misses these, we stop and keep part 1.
+Use equivalent workloads, verified response bodies, equal connection counts, and the same Node version. Interleave A/B rounds and run A/A to measure noise. Record every sample, warmup settings, errors, median and p95, CPU/OS details, and artifact sizes. Do not discard losses or omit the outbound relay from smoke or performance acceptance.
+
+If the prototype misses these, we stop and keep part 1. Completing the integration suite alone does not justify merging the native runtime or claiming that it beats TypeScript.
 
 ## Alternatives considered
 
