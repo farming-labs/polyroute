@@ -121,6 +121,10 @@ jobs:
 
   native-quality:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [runtime, compiler]
     defaults:
       run:
         working-directory: packages/polyroute-wasmtime
@@ -133,8 +137,16 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
       - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - name: Check runtime without compiler features
+        if: matrix.features == 'runtime'
+        run: |
+          cargo clippy --all-targets --locked --no-default-features -- -D warnings
+          cargo test --locked --no-default-features
+      - name: Check the build-time compiler
+        if: matrix.features == 'compiler'
+        run: |
+          cargo clippy --all-targets --locked --features compiler -- -D warnings
+          cargo test --locked --features compiler
 
   lint:
     runs-on: ubuntu-latest

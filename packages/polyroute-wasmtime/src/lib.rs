@@ -1,5 +1,5 @@
 //! Runs polyroute's `wasi:http` routes in wasmtime, called from Node through
-//! Node-API. A build precompiles each route to machine code with [`precompile`],
+//! Node-API. The build-time addon precompiles each route to machine code,
 //! and the server maps that file into memory with [`Route`].
 
 use std::future::Future;
@@ -79,6 +79,7 @@ pub fn info() -> AddonInfo {
 }
 
 /// Compiles a component to machine code for this addon's target.
+#[cfg(feature = "compiler")]
 #[napi]
 pub fn precompile(component: Buffer) -> napi::Result<Buffer> {
     let compiled = engine()?
@@ -280,13 +281,13 @@ fn latin1_string(bytes: &[u8]) -> String {
 impl Route {
     /// Maps the `.cwasm` at `path` into memory and links it.
     ///
-    /// The file must have been written by [`precompile`] from this same addon,
+    /// The file must have been written by the matching build-time addon,
     /// and must not change while the process runs.
     #[napi(constructor)]
     pub fn new(path: String, options: RouteOptions) -> napi::Result<Self> {
         let engine = engine()?;
-        // SAFETY: the build writes this file with `precompile` from the same
-        // addon, and the deployed bundle doesn't modify it while it's mapped.
+        // SAFETY: the build writes this file with the matching compiler and
+        // engine configuration, and the bundle doesn't modify it while mapped.
         // wasmtime checks the version and settings recorded in the file.
         let component = unsafe { Component::deserialize_file(engine, &path) }
             .map_err(|error| napi::Error::from_reason(format!("{error:#}")))?;

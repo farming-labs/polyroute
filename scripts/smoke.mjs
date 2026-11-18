@@ -109,6 +109,36 @@ async function preparePackedApp() {
   return { appDir, cleanup: () => rm(workDir, { recursive: true, force: true }) };
 }
 
+async function checkNativeDeployment(appDir) {
+  const dist = path.join(appDir, "dist");
+  const addons = (await readdir(dist, { recursive: true })).filter((file) =>
+    file.endsWith(".node"),
+  );
+  if (addons.length !== 1) {
+    throw new Error(
+      `The native deployment must contain exactly one runtime addon; found ${addons.length}.`,
+    );
+  }
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import assert from "node:assert/strict";
+       import { createRequire } from "node:module";
+       const addon = createRequire(import.meta.url)(process.argv[1]);
+       assert.equal(typeof addon.Route, "function");
+       assert.equal(typeof addon.precompile, "undefined", "The deployed addon must not include a compiler.");`,
+      path.join(dist, addons[0]),
+    ],
+    { cwd: appDir, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error("The deployed native addon failed its compiler-free runtime check.");
+  }
+}
+
 function startServer(appDir) {
   const child = spawn(process.execPath, ["dist/server.js"], {
     cwd: appDir,
@@ -198,6 +228,14 @@ const checks = [
 ];
 
 const { appDir, cleanup } = packed ? await preparePackedApp() : await prepareWorkspaceApp();
+if (runtime === "wasmtime") {
+  try {
+    await checkNativeDeployment(appDir);
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
 const { child, ready } = startServer(appDir);
 let failures = 0;
 try {

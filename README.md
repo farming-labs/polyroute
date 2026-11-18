@@ -316,6 +316,7 @@ polyroute({ experimental: { runtime: "wasmtime" } });
 It's a prototype from [RFC 0001](https://github.com/farming-labs/polyroute/pull/15), part 2, and it may change or go away in any release.
 
 - **It needs the addon.** Add `@farming-labs/polyroute-wasmtime` to the app. It isn't published yet, so build it in this repository with `pnpm --filter @farming-labs/polyroute-wasmtime build`, which needs Rust.
+- **The deployed addon has no compiler.** The package builds separate compiler and runtime binaries. Only the runtime binary is copied into the server bundle; it loads precompiled components without Cranelift.
 - **It builds for this machine only.** The build writes each route's machine code to `polyroute/<hash>/<target>.cwasm`, and copies the addon to `polyroute/wasmtime/<target>.node`, next to the chunk that loads them. Deploy that folder to a server with the same OS and architecture. A server that can't load either file fails with `RUNTIME_UNAVAILABLE` on the route's first request. It never falls back to jco.
 - **Dev still uses jco.** Only `vite build` uses wasmtime.
 - **Outbound routes use native workers.** They call the same JavaScript HTTP host and enforce the same `outbound.allow` policy. They do not require JSPI, including on Node 22. At most 32 requests run per route at once, including in `"per-request"` mode; additional calls wait for a worker.

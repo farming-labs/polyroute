@@ -52,7 +52,7 @@ export interface OutboundResponse {
 }
 
 export declare class Route {
-  /** Maps a `.cwasm` that `precompile` from this same addon wrote. */
+  /** Maps a `.cwasm` from the matching build-time compiler. */
   constructor(path: string, options: RouteOptions);
   /** Serves one request, synchronously, on the calling thread. */
   handle(method: string, url: string, headers: string[], body: Buffer): HandleResult;
@@ -63,11 +63,16 @@ export declare class Route {
   ): Promise<HandleResult>;
 }
 
-export interface Addon {
+export interface RuntimeAddon {
   info(): AddonInfo;
-  precompile(component: Uint8Array): Buffer;
   Route: typeof Route;
 }
 
+export interface Addon extends RuntimeAddon {
+  precompile(component: Uint8Array): Buffer;
+}
+
+/** The compiler-free binary copied into deployed servers. */
 export declare const addonPath: string;
+/** Loads the compiler addon used during builds. */
 export declare function loadAddon(): Addon;

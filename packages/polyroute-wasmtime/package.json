@@ -12,7 +12,8 @@
   "files": [
     "index.d.ts",
     "index.js",
-    "polyroute-wasmtime.node"
+    "polyroute-wasmtime.node",
+    "polyroute-wasmtime-compiler.node"
   ],
   "type": "module",
   "sideEffects": false,

@@ -131,10 +131,10 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 The prototype differs from the proposed end state below:
 
-- `experimental.targets`, cross-compilation, prebuilt distribution, and a compiler-free deployment addon are not implemented. The private addon currently includes Cranelift for build-time compilation.
+- `experimental.targets`, cross-compilation, and prebuilt distribution are not implemented. The compiler-free deployment addon is being verified in PR #23; Cranelift stays in its separate build-time binary.
 - Development still uses jco and reports this explicitly. Native development parity remains unimplemented.
 - Routes without outbound imports use the synchronous Node-API path. Outbound routes use Tokio workers and call the existing JavaScript HTTP host, enforcing its allowlist and cancellation. At most 32 requests per route run concurrently; excess calls wait. This also bounds native per-request mode.
-- Outbound Rust, Go, and Python integration passed on macOS with Node 24 at implementation commit `2f48eed`. The complete native workspace/packed smoke and cross-platform checks are still being verified. Passing these checks is separate from the throughput and cold-start acceptance below.
+- Outbound Rust, Go, and Python integration, workspace/packed smoke, and the full Linux/macOS/Windows matrix on Node 22 and 24 passed at `7daf491` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44295931880)). The compiler-free addon has passed the full macOS Node 24 suite and both runtimes' workspace/packed smoke locally; its cross-platform CI is pending. Passing these checks is separate from the throughput and cold-start acceptance below.
 
 The proposed configuration and packaging below describe remaining design work; they are not currently supported APIs.
 

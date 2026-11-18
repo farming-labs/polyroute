@@ -55,7 +55,7 @@ export interface WasmtimeHandlerOptions {
   target: string;
   /** The addon the build copied next to the bundle. */
   addon: URL;
-  /** The route's machine code, which the build compiled with that addon. */
+  /** The route's machine code, compiled for the matching runtime addon. */
   component: URL;
   /** Defaults to `"reuse"`. */
   instances?: InstanceMode;

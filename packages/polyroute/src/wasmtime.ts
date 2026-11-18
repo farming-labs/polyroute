@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PolyrouteError } from "./errors.js";
 
@@ -24,7 +24,7 @@ export interface PrecompiledRoute {
   target: string;
   /** The cached machine code. */
   file: string;
-  /** The addon that compiled it, which the server has to load it with. */
+  /** The matching compiler-free addon the server loads it with. */
   addonFile: string;
 }
 
@@ -43,6 +43,7 @@ function loadAddonPackage(): Promise<{ addonPath: string; addon: Addon }> {
       );
     }
     try {
+      await access(loaded.addonPath);
       return { addonPath: loaded.addonPath, addon: loaded.loadAddon() };
     } catch (error) {
       throw new PolyrouteError(
@@ -61,7 +62,7 @@ function loadAddonPackage(): Promise<{ addonPath: string; addon: Addon }> {
 
 /**
  * Compiles a route's component to machine code for this machine with the
- * addon the server will load it with. The result is cached, since compiling
+ * compiler that matches the server's runtime addon. The result is cached, since compiling
  * a Go or Python route takes seconds.
  */
 export async function precompileRoute(
