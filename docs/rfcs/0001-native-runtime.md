@@ -127,7 +127,7 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 ### Prototype status
 
-[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the building machine and emits the addon and precompiled components beside the server. The default runtime remains jco. No new performance win or completed acceptance is claimed yet.
+[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the build machine's OS and architecture using baseline CPU features and emits the addon and precompiled components beside the server. [ADR 0019](../decisions/0019-native-cpu-baseline.md) records the provider CPU mismatch that prompted this default and cache change. Earlier host-tuned measurements do not establish performance for the rebuilt artifacts. The default runtime remains jco. No new performance win or completed acceptance is claimed yet.
 
 The prototype differs from the proposed end state below:
 

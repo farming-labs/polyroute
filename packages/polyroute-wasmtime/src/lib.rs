@@ -51,6 +51,10 @@ fn engine() -> napi::Result<&'static Engine> {
             // Precompiling and loading must use the same settings, so this is
             // the only place an engine is configured.
             let mut config = Config::new();
+            // CI and deployment CPUs can differ even with the same target triple.
+            config
+                .target(TARGET)
+                .map_err(|error| format!("{error:#}"))?;
             // A process can load several copies of this addon, one per server
             // bundle. With Mach ports, each copy points the thread's exception
             // port at itself when it first runs a guest there, so a trap in a
@@ -87,6 +91,37 @@ pub fn precompile(component: Buffer) -> napi::Result<Buffer> {
         .precompile_component(&component)
         .map_err(|error| napi::Error::from_reason(format!("{error:#}")))?;
     Ok(compiled.into())
+}
+
+#[cfg(all(test, feature = "compiler"))]
+mod cpu_baseline_tests {
+    use super::*;
+
+    #[test]
+    fn precompiled_code_runs_without_optional_host_cpu_features() {
+        // This module exports `run() -> i32`, which returns 42.
+        let wasm = [
+            0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0, 7, 7, 1, 3, 114, 117,
+            110, 0, 0, 10, 6, 1, 4, 0, 65, 42, 11,
+        ];
+        let compiled = engine().unwrap().precompile_module(&wasm).unwrap();
+        let mut config = Config::new();
+        config.target(TARGET).unwrap();
+        config.macos_use_mach_ports(false);
+        config.enable_compiler(false);
+        // SAFETY: reporting every optional feature unavailable only restricts
+        // execution; it never enables instructions this CPU cannot run.
+        unsafe { config.detect_host_feature(|_| Some(false)) };
+        let consumer = Engine::new(&config).unwrap();
+        // SAFETY: these bytes were just produced by this exact Wasmtime build.
+        let module = unsafe { wasmtime::Module::deserialize(&consumer, &compiled) }.unwrap();
+        let mut store = Store::new(&consumer, ());
+        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        let run = instance
+            .get_typed_func::<(), i32>(&mut store, "run")
+            .unwrap();
+        assert_eq!(run.call(&mut store, ()).unwrap(), 42);
+    }
 }
 
 /// Output the guest writes to stdout or stderr, kept until the host takes it.

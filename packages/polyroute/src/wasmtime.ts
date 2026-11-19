@@ -3,8 +3,8 @@ import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PolyrouteError } from "./errors.js";
 
-/** Bump when the cached machine code's format or naming changes. */
-const CACHE_FORMAT = 1;
+/** Bump when the cached machine code's format, naming, or compiler settings change. */
+const CACHE_FORMAT = 2;
 const ADDON_PACKAGE = "@farming-labs/polyroute-wasmtime";
 
 interface Addon {
@@ -61,7 +61,7 @@ function loadAddonPackage(): Promise<{ addonPath: string; addon: Addon }> {
 }
 
 /**
- * Compiles a route's component to machine code for this machine with the
+ * Compiles a route's component to this OS/architecture's baseline machine code with the
  * compiler that matches the server's runtime addon. The result is cached, since compiling
  * a Go or Python route takes seconds.
  */

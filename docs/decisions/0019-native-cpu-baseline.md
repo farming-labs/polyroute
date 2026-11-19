@@ -1,0 +1,47 @@
+# 0019: Compile native routes for the target CPU baseline
+
+Status: implemented, 2026-11-18. Local compiler/runtime, release-route and packed checks pass; rebuilt Linux/provider verification pending.
+
+## Problem
+
+The first Vercel deployment of the verified Linux probe (`df36bf7`, CI run `44395448679`) reached READY but failed its first Rust invocation. Wasmtime rejected `route.cwasm`: `compilation setting "has_avx512bitalg" is enabled, but not available on the host`. The deployment is `dpl_DeuNzbXghDa3v9SCQbK2vrZyfPbC` in the dedicated farming-labs `polyroute-native-probe` project. No provider timing result was collected.
+
+The compiler uses `Config::new()` without an explicit target. Wasmtime therefore enables instruction-set extensions detected on the build machine. The component cache records the OS/architecture triple and Wasmtime version, but not those detected CPU features. Matching the OS and architecture is insufficient when CI and the deployment use different CPUs.
+
+## Decision and scope
+
+Set Wasmtime's compilation target explicitly to the addon's existing `POLYROUTE_TARGET` triple. [Wasmtime's target configuration](https://docs.rs/wasmtime/50.0.2/wasmtime/struct.Config.html#method.target) disables host-inferred CPU extensions when a target is supplied. This fixes the compiler default used by both the addon builds and the private probe without adding a separate compiler or a public option. Keep the existing engine settings and runtime compatibility checks.
+
+Increment the machine-code cache format so earlier host-tuned artifacts are not reused. Preserve existing cache files; rebuilding selects a separate key. The public API, guest authority, OS/architecture restriction, compiler-free deployment and failure behavior remain unchanged. Re-review the probe's production-source digest because the shared compiler implementation changes; its extracted request and worker behavior does not.
+
+## Alternatives and consequences
+
+Disabling only AVX-512 BITALG would leave other builder-specific extensions enabled. Disabling runtime compatibility checks could execute unsupported instructions. A private probe-only compiler would duplicate configuration and leave the addon with the same deployment failure. Explicit target-baseline compilation avoids those failures but may change throughput; previous host-tuned measurements remain historical evidence and do not establish performance for the new artifacts.
+
+## Acceptance and verification
+
+- Before the fix, compile a real Wasm module through the addon's engine and reproduce rejection by a runtime that reports optional CPU extensions unavailable. After the fix, deserialize and execute that module on the same constrained runtime. The test only removes reported features; it never claims unavailable hardware support.
+- Seed the previous cache key with invalid bytes, then require `precompileRoute` to build usable code under a new key while preserving the old file.
+- Run Rust formatting, Clippy and tests for both feature sets, the focused native route/cache tests, and existing production and packed checks in the Linux/macOS/Windows CI matrix.
+- Rebuild the private probe artifacts in Linux CI, retain their hashes, verify its Lambda/Vercel boundaries and redeploy to the dedicated project. Require real native and TypeScript responses before collecting any provider timings.
+
+Portable machine code does not establish serverless performance acceptance. Provider CPU availability, the response correctness checks and measured performance remain separate gates before merging.
+
+## Local verification
+
+On macOS arm64 with Rust 1.99.1 and Wasmtime 50.0.2, the new CPU regression first failed with `compilation setting "has_lse" is enabled, but not available on the host`. After setting the explicit target, the same compiled module deserializes and returns 42 with every optional host feature reported unavailable. The cache regression first returned the seeded old artifact; after the format increment it writes freshly compiled bytes under a different key and preserves the old file.
+
+- `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo test --locked --features compiler`: six passed.
+- `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo test --locked --no-default-features`: five passed.
+- `cargo fmt --all --check`: passed.
+- `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo clippy --all-targets --locked --features compiler -- -D warnings`: passed.
+- `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo clippy --all-targets --locked --no-default-features -- -D warnings`: passed.
+- `pnpm --filter @farming-labs/polyroute-wasmtime build`: both release binaries built.
+- `pnpm build` and `pnpm typecheck`: passed.
+- `node --test scripts/*.test.mjs` on Node 24.21.0: fourteen passed.
+- `pnpm --filter @farming-labs/polyroute exec vitest run test/wasmtime-cache.test.ts` on Node 24.21.0 with the rebuilt release compiler: one passed.
+- `pnpm --filter @farming-labs/polyroute exec vitest run test/wasmtime.test.ts` on Node 24.21.0 with both rebuilt release binaries: 23 passed.
+- `pnpm smoke --runtime wasmtime` and `pnpm smoke:packed --runtime wasmtime`: fifteen real HTTP checks passed each, including outbound relay and compiler-free deployment validation. The packed run installs fresh tarballs outside the workspace.
+- `pnpm lint` and `pnpm fmt:check`: passed.
+
+These local checks do not establish Linux/provider compatibility or performance. The complete Linux/macOS/Windows matrix, private Linux probe rebuild and successful native provider invocation remain pending. No new timing comparison was run.
