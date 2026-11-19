@@ -7,7 +7,7 @@ import { createQueue, runTool } from "./process.js";
 import type { Language, RouteBuildInput, RouteBuildResult } from "./types.js";
 
 export const COMPONENTIZE_GO_VERSION = "v0.5.3";
-export const GO_WASI_VERSION = "v0.1.2";
+export const GO_WASI_VERSION = "v0.1.3-0.20261119173204-d97e27847973";
 
 /**
  * Requests one reused Go instance serves before the runtime replaces it.

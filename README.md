@@ -135,7 +135,7 @@ Create the module next to the route. polyroute builds with [componentize-go](htt
 
 ```bash
 go mod init example.com/greet
-go get go.bytecodealliance.org/wasi@v0.1.2
+go get go.bytecodealliance.org/wasi@v0.1.3-0.20261119173204-d97e27847973
 go get -tool github.com/bytecodealliance/componentize-go@v0.5.3
 ```
 
@@ -320,7 +320,7 @@ It's a prototype from [RFC 0001](https://github.com/farming-labs/polyroute/pull/
 - **It builds for this OS and architecture.** The build writes each route's machine code to `polyroute/<hash>/<target>.cwasm`, and copies the addon to `polyroute/wasmtime/<target>.node`, next to the chunk that loads them. Components use the target's baseline CPU features, so they do not require optional instructions detected on the builder. Deploy that folder to a server with the same OS and architecture. Rebuild older output to replace host-tuned components; the new cache format leaves the earlier entries untouched. A server that can't load either file fails with `RUNTIME_UNAVAILABLE` on the route's first request. It never falls back to jco. See [the CPU compatibility decision](docs/decisions/0019-native-cpu-baseline.md).
 - **Dev still uses jco.** Only `vite build` uses wasmtime.
 - **Python batches buffered HTTP transfers.** Native builds use a private host interface to read the request and send the completed response. The Python `Request`, `Response`, and handler API stays the same; status, header, and body validation still uses the WASI host. Default builds and dev use standard `wasi:http` interfaces. See [the transfer design](docs/decisions/0007-native-python-http-transfers.md).
-- **Go response writes have a known SDK limit.** With `go.bytecodealliance.org/wasi` v0.1.2, a single response write larger than 1 MiB traps in the native runtime. An isolated fix reuses the SDK’s existing chunked writer, but the production dependency is unchanged. See [the reproduced failure and fix](docs/decisions/0009-go-response-write-budget.md).
+- **Existing Go modules need the response-writer fix.** With `go.bytecodealliance.org/wasi` v0.1.2, a single response write larger than 1 MiB traps in the native runtime. The setup command above pins the merged upstream fix. In an existing route module, run `go get go.bytecodealliance.org/wasi@v0.1.3-0.20261119173204-d97e27847973`; Polyroute does not rewrite caller dependencies. See [the regression and upstream adoption](docs/decisions/0009-go-response-write-budget.md).
 - **Outbound routes use native workers.** They call the same JavaScript HTTP host and enforce the same `outbound.allow` policy. They do not require JSPI, including on Node 22. At most 32 requests run per route at once, including in `"per-request"` mode; additional calls wait for a worker.
 - **Everything else matches the default runtime.** [Instances](#instances) work the same way, including `"per-request"` and Go's limit of 1,000 requests per instance, and so does the [list of what a route can use](#what-a-route-can-use). Errors use the same codes, and a `ROUTE_TRAPPED` error carries the trapped request's stderr. Routes without outbound imports make one synchronous call into the addon. [The outbound design](docs/decisions/0004-native-outbound-http.md) describes worker ownership and cancellation.
 

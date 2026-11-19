@@ -2,7 +2,7 @@
 
 **Build and verify a private, compiler-free Lambda artifact from the standalone native prototype.**
 
-This is an experiment for [ADR 0014](../../docs/decisions/0014-local-lambda-adapter.md) and [ADR 0015](../../docs/decisions/0015-linux-lambda-artifact.md). It does not add a public Polyroute deployment target, deploy resources, or establish provider performance. The Go SDK oversized-response bug remains unresolved. The initial Linux target is x86_64 only.
+This is an experiment for [ADR 0014](../../docs/decisions/0014-local-lambda-adapter.md) and [ADR 0015](../../docs/decisions/0015-linux-lambda-artifact.md). It does not add a public Polyroute deployment target, deploy resources, or establish provider performance. The fixtures use the merged upstream Go response-writer fix; the shared cases verify large binary responses in reused and per-request instances. The initial Linux target is x86_64 only.
 
 The adapter uses the official AWS Runtime API client and HTTP request parser. Its response encoder preserves exact bytes, Latin-1 headers, repeated ordinary headers, and cookies. Guest capabilities, Go's 1,000-request limit, and trap retirement match the tested standalone prototype. The Python resource implementation is imported directly from the production crate. `provenance.json` pins the production sources from which the isolated worker and policy contract were derived; preparing fixtures fails when those sources change, requiring review before updating that record.
 

@@ -2,7 +2,7 @@ module polyroute.example/slug
 
 go 1.27.1
 
-require go.bytecodealliance.org/wasi v0.1.2
+require go.bytecodealliance.org/wasi v0.1.3-0.20261119173204-d97e27847973
 
 require (
 	github.com/apparentlymart/go-userdirs v0.0.0-20200915174352-b0c018a67c13 // indirect
