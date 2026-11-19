@@ -9,11 +9,17 @@ import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { benchmarkRoutes } from "./bench-routes.mjs";
 
 const repo = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = path.join(repo, "packages/polyroute");
 const exampleDir = path.join(repo, "examples/polyglot");
 const packed = process.argv.includes("--packed");
+const runtimeIndex = process.argv.indexOf("--runtime");
+const runtime = runtimeIndex === -1 ? "jco" : process.argv[runtimeIndex + 1];
+if (runtime !== "jco" && runtime !== "wasmtime") {
+  throw new Error('`--runtime` must be "jco" or "wasmtime".');
+}
 
 function run(command, args, cwd) {
   console.log(`$ ${command} ${args.join(" ")}  (in ${path.relative(repo, cwd) || "."})`);
@@ -29,7 +35,7 @@ function run(command, args, cwd) {
 
 async function prepareWorkspaceApp() {
   run("pnpm", ["--filter", "@farming-labs/polyroute", "build"], repo);
-  run("pnpm", ["--filter", "polyroute-example-polyglot", "build"], repo);
+  run("pnpm", ["--filter", "polyroute-example-polyglot", "build", "--mode", runtime], repo);
   return { appDir: exampleDir, cleanup: async () => {} };
 }
 
@@ -82,11 +88,55 @@ async function preparePackedApp() {
   const manifestPath = path.join(appDir, "package.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   manifest.dependencies["@farming-labs/polyroute"] = `file:${path.join(workDir, tarball)}`;
+  if (runtime === "wasmtime") {
+    run(
+      "pnpm",
+      ["pack", "--pack-destination", workDir],
+      path.join(repo, "packages/polyroute-wasmtime"),
+    );
+    const nativeTarball = (await readdir(workDir)).find(
+      (file) => file.endsWith(".tgz") && file !== tarball,
+    );
+    if (nativeTarball === undefined)
+      throw new Error("Packing the native addon produced no tarball.");
+    manifest.dependencies["@farming-labs/polyroute-wasmtime"] =
+      `file:${path.join(workDir, nativeTarball)}`;
+  }
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   run("npm", ["install", "--no-audit", "--no-fund"], appDir);
-  run("npx", ["vite", "build"], appDir);
+  run("npx", ["vite", "build", "--mode", runtime], appDir);
   return { appDir, cleanup: () => rm(workDir, { recursive: true, force: true }) };
+}
+
+async function checkNativeDeployment(appDir) {
+  const dist = path.join(appDir, "dist");
+  const addons = (await readdir(dist, { recursive: true })).filter((file) =>
+    file.endsWith(".node"),
+  );
+  if (addons.length !== 1) {
+    throw new Error(
+      `The native deployment must contain exactly one runtime addon; found ${addons.length}.`,
+    );
+  }
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import assert from "node:assert/strict";
+       import { createRequire } from "node:module";
+       const addon = createRequire(import.meta.url)(process.argv[1]);
+       assert.equal(typeof addon.Route, "function");
+       assert.equal(typeof addon.precompile, "undefined", "The deployed addon must not include a compiler.");`,
+      path.join(dist, addons[0]),
+    ],
+    { cwd: appDir, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error("The deployed native addon failed its compiler-free runtime check.");
+  }
 }
 
 function startServer(appDir) {
@@ -158,9 +208,8 @@ const checks = [
     status: 200,
     body: '{"slug":"hello-world-farm","text":"Hello World, Farm!"}\n',
   },
-  // The relay route sends a request, which needs JSPI (Node 24 and later).
-  // Without it, the route fails with UNSUPPORTED_RUNTIME and the server answers 500.
-  typeof WebAssembly.Suspending === "function"
+  // Native outbound doesn't require JSPI; jco needs Node 24 and later.
+  runtime === "wasmtime" || typeof WebAssembly.Suspending === "function"
     ? {
         name: "Rust route calls another route over HTTP",
         path: "/api/relay",
@@ -173,9 +222,20 @@ const checks = [
         status: 500,
       },
   { name: "unknown path", path: "/api/missing", status: 404 },
+  ...benchmarkRoutes
+    .filter((route) => route.matchedOnly && route.language === "TypeScript")
+    .map((route) => ({ ...route, status: 200 })),
 ];
 
 const { appDir, cleanup } = packed ? await preparePackedApp() : await prepareWorkspaceApp();
+if (runtime === "wasmtime") {
+  try {
+    await checkNativeDeployment(appDir);
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
 const { child, ready } = startServer(appDir);
 let failures = 0;
 try {
@@ -208,4 +268,6 @@ if (failures > 0) {
   console.error(`${failures} of ${checks.length} checks failed.`);
   process.exit(1);
 }
-console.log(`All ${checks.length} checks passed (${packed ? "packed tarball" : "workspace"}).`);
+console.log(
+  `All ${checks.length} checks passed (${runtime}, ${packed ? "packed tarball" : "workspace"}).`,
+);

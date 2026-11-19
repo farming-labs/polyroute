@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm --filter @farming-labs/polyroute build",
-    "test": "pnpm --filter @farming-labs/polyroute test",
+    "test": "node --test scripts/*.test.mjs && pnpm --filter @farming-labs/polyroute test",
     "typecheck": "pnpm -r typecheck",
     "lint": "oxlint",
     "fmt": "oxfmt",

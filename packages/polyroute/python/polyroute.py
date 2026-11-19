@@ -98,6 +98,14 @@ Handler = Callable[[Request], Any]
 
 def create_handler(module: ModuleType) -> type:
     """Returns the `IncomingHandler` class componentize-py exports for a route module."""
+    return _create_handler(module, _read_request, _send)
+
+
+def _create_handler(
+    module: ModuleType,
+    read_request: Callable[[types.IncomingRequest], Request],
+    send_response: Callable[[Response, types.ResponseOutparam], None],
+) -> type:
     handlers: Dict[str, Handler] = {
         method: getattr(module, method)
         for method in METHODS
@@ -119,7 +127,7 @@ def create_handler(module: ModuleType) -> type:
         def handle(
             self, request: types.IncomingRequest, response_out: types.ResponseOutparam
         ) -> None:
-            incoming = _read_request(request)
+            incoming = read_request(request)
             handler = handlers.get(incoming.method)
             if handler is None and incoming.method == "HEAD":
                 handler = handlers.get("GET")
@@ -134,7 +142,7 @@ def create_handler(module: ModuleType) -> type:
                         f"{module.__name__}.{incoming.method} returned "
                         f"{type(response).__name__}, not a polyroute Response."
                     )
-            _send(response, response_out)
+            send_response(response, response_out)
 
     return IncomingHandler
 

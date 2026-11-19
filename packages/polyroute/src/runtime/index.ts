@@ -15,6 +15,15 @@ import {
   type StreamSink,
 } from "./host.js";
 import { createOutboundPolicy, type OutboundOptions, type OutboundPolicy } from "./outbound.js";
+import {
+  STDERR_TAIL_LINES,
+  assertFinalStatus,
+  createResponse,
+  errorCodeError,
+  noResponseError,
+  trappedError,
+  unfinishedBodyError,
+} from "./response.js";
 
 export { PolyrouteError, type PolyrouteErrorCode } from "../errors.js";
 export type { OutboundOptions } from "./outbound.js";
@@ -78,11 +87,9 @@ export interface WasiHttpRoute {
   readonly fetch: FetchHandler;
 }
 
-const STDERR_TAIL_LINES = 20;
 // Built once: `abort()` without a reason builds a DOMException on every
 // request, which costs several times more than the rest of the abort.
 const ROUTE_ANSWERED = new DOMException("The route answered its request.", "AbortError");
-const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 /**
  * A route that waits for outbound responses serves concurrent requests with
@@ -321,17 +328,7 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       // A trapped instance can't be trusted or even called again.
       retire(slot);
       stderr.end();
-      const detail =
-        stderrTail.length > 0
-          ? stderrTail.join("\n")
-          : error instanceof Error
-            ? error.message
-            : String(error);
-      throw new PolyrouteError(
-        "ROUTE_TRAPPED",
-        `Route \`${route}\` trapped while handling ${request.method} ${url.pathname}:\n${detail}`,
-        { cause: error },
-      );
+      throw trappedError(route, request.method, url.pathname, stderrTail, error);
     } finally {
       controller?.abort(ROUTE_ANSWERED);
       if (slot.outbound !== undefined) slot.outbound.signal = undefined;
@@ -344,18 +341,8 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
       if (reuse) release(slot);
     }
 
-    if (result === undefined) {
-      throw new PolyrouteError(
-        "ROUTE_NO_RESPONSE",
-        `Route \`${route}\` returned without sending a response. Respond (for example with \`responder.respond(...)\` in wstd) before the handler returns.`,
-      );
-    }
-    if (result.tag === "err") {
-      throw new PolyrouteError(
-        "ROUTE_ERROR",
-        `Route \`${route}\` answered with the wasi:http error \`${describeErrorCode(result.val)}\` instead of a response.`,
-      );
-    }
+    if (result === undefined) throw noResponseError(route);
+    if (result.tag === "err") throw errorCodeError(route, describeErrorCode(result.val));
     return toWebResponse(route, request.method, result.val);
   };
 
@@ -364,32 +351,11 @@ export function createWasiHttpHandler(options: WasiHttpHandlerOptions): WasiHttp
 
 function toWebResponse(route: string, method: string, response: OutgoingResponse): Response {
   const { status, headers, body } = readOutgoingResponse(response);
-
-  if (status < 200) {
-    throw new PolyrouteError(
-      "ROUTE_INVALID_RESPONSE",
-      `Route \`${route}\` responded with status ${status}. Informational (1xx) statuses can't be a final response.`,
-    );
-  }
-  if (body !== undefined && !body.finished) {
-    throw new PolyrouteError(
-      "ROUTE_INVALID_RESPONSE",
-      `Route \`${route}\` started a response body but never finished it. Call \`outgoing-body.finish\` (wstd does this when the body is dropped).`,
-    );
-  }
+  assertFinalStatus(route, status);
+  if (body !== undefined && !body.finished) throw unfinishedBodyError(route);
 
   const bytes = body?.bytes ?? new Uint8Array(0);
   const webHeaders = new Headers();
   for (const [name, value] of headers) webHeaders.append(name, latin1Decode(value));
-
-  const declaredLength = webHeaders.get("content-length");
-  if (declaredLength !== null && Number(declaredLength) !== bytes.length) {
-    throw new PolyrouteError(
-      "ROUTE_INVALID_RESPONSE",
-      `Route \`${route}\` declared \`content-length: ${declaredLength}\` but wrote ${bytes.length} bytes.`,
-    );
-  }
-
-  const hasNullBody = method === "HEAD" || NULL_BODY_STATUSES.has(status);
-  return new Response(hasNullBody ? null : bytes, { status, headers: webHeaders });
+  return createResponse(route, method, status, webHeaders, bytes);
 }

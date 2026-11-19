@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, ResolvedConfig } from "vite";
@@ -7,6 +7,7 @@ import { LANGUAGES, findLanguage } from "./languages/index.js";
 import { INSTANCE_MODES, type InstanceMode } from "./runtime/index.js";
 import { createOutboundPolicy, type OutboundOptions } from "./runtime/outbound.js";
 import { transpileRoute, type TranspiledRoute } from "./transpile.js";
+import { precompileRoute, type PrecompiledRoute } from "./wasmtime.js";
 
 export interface PolyrouteOptions {
   /**
@@ -28,11 +29,34 @@ export interface PolyrouteOptions {
    * polyroute({ outbound: { allow: ["api.github.com", "*.example.com"] } })
    */
   outbound?: OutboundOptions;
+  /** Opt-in features that may change or go away in any release. */
+  experimental?: ExperimentalOptions;
+}
+
+/**
+ * What runs a route's WebAssembly.
+ *
+ * - `"jco"` (default): jco transpiles each route to JavaScript that runs its
+ *   core modules in the JavaScript engine's WebAssembly.
+ * - `"wasmtime"`: `vite build` compiles each route to machine code for the
+ *   build OS and architecture's baseline CPU, and the server runs it through a Node-API
+ *   addon. Needs the `@farming-labs/polyroute-wasmtime` package, and the server
+ *   must run on the same OS and architecture as the build. Dev still uses jco.
+ *   Outbound requests follow the configured allowlist and are denied by default.
+ */
+export type Runtime = "jco" | "wasmtime";
+
+export const RUNTIMES: readonly Runtime[] = ["jco", "wasmtime"];
+
+export interface ExperimentalOptions {
+  /** Defaults to `"jco"`. See {@link Runtime}. */
+  runtime?: Runtime;
 }
 
 interface ResolvedPolyrouteOptions {
   instances: InstanceMode;
   outbound: OutboundOptions | undefined;
+  runtime: Runtime;
 }
 
 function resolveOptions(options: PolyrouteOptions): ResolvedPolyrouteOptions {
@@ -47,10 +71,25 @@ function resolveOptions(options: PolyrouteOptions): ResolvedPolyrouteOptions {
     options.outbound === undefined
       ? undefined
       : { allow: createOutboundPolicy(options.outbound).allow };
-  return { instances, outbound };
+  const experimental = options.experimental ?? {};
+  if (typeof experimental !== "object" || experimental === null) {
+    throw new PolyrouteError(
+      "INVALID_OPTIONS",
+      `\`experimental\` must be an object, but it's ${JSON.stringify(experimental)}.`,
+    );
+  }
+  const runtime = experimental.runtime ?? "jco";
+  if (!RUNTIMES.includes(runtime)) {
+    throw new PolyrouteError(
+      "INVALID_OPTIONS",
+      `\`experimental.runtime\` must be ${RUNTIMES.map((name) => `"${name}"`).join(" or ")}, but it's ${JSON.stringify(runtime)}.`,
+    );
+  }
+  return { instances, outbound, runtime };
 }
 
 const RUNTIME_ID = "@farming-labs/polyroute/runtime";
+const WASMTIME_RUNTIME_ID = "@farming-labs/polyroute/runtime/wasmtime";
 const BINDINGS_ID = "virtual:polyroute/bindings/";
 const RESOLVED_BINDINGS_ID = `\0${BINDINGS_ID}`;
 const ROUTE_FILE = new RegExp(
@@ -60,9 +99,11 @@ const ROUTE_FILE = new RegExp(
 const VITE_QUERY = /[?&](?:raw|url|init|inline|no-inline|worker|sharedworker)(?:[&=]|$)/;
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
 
-function runtimeEntry(): string {
-  const built = fileURLToPath(new URL("./runtime/index.js", import.meta.url));
-  return existsSync(built) ? built : fileURLToPath(new URL("./runtime/index.ts", import.meta.url));
+function runtimeEntry(name: "index" | "wasmtime"): string {
+  const built = fileURLToPath(new URL(`./runtime/${name}.js`, import.meta.url));
+  return existsSync(built)
+    ? built
+    : fileURLToPath(new URL(`./runtime/${name}.ts`, import.meta.url));
 }
 
 function toPosix(file: string): string {
@@ -73,6 +114,23 @@ function toPosix(file: string): string {
 function coreModuleFile(key: string, name: string): string {
   return `polyroute/${key}/${name}`;
 }
+
+/** Where a build writes a route's machine code, relative to the chunk that loads it. */
+function machineCodeFile(route: PrecompiledRoute): string {
+  return `polyroute/${route.key}/${route.target}.cwasm`;
+}
+
+/** Where a build writes the wasmtime addon, relative to the chunk that loads it. */
+function addonFile(target: string): string {
+  return `polyroute/wasmtime/${target}.node`;
+}
+
+const ROUTE_EXPORTS = [
+  "export default route;",
+  "export const fetch = route.fetch;",
+  ...METHODS.map((method) => `export const ${method} = route.fetch;`),
+  "",
+];
 
 /**
  * The module a route file compiles to. With `coreModuleFiles`, it loads its
@@ -112,10 +170,35 @@ export function createRouteModule(
     "  },",
     "});",
     "",
-    "export default route;",
-    "export const fetch = route.fetch;",
-    ...METHODS.map((method) => `export const ${method} = route.fetch;`),
+    ...ROUTE_EXPORTS,
+  ].join("\n");
+}
+
+/** The module a route file compiles to when wasmtime runs it. */
+export function createWasmtimeRouteModule(
+  label: string,
+  precompiled: PrecompiledRoute,
+  instances: InstanceMode,
+  requestsPerInstance?: number,
+  outbound?: OutboundOptions,
+): string {
+  const url = (file: string) => `new URL(${JSON.stringify(`./${file}`)}, import.meta.url)`;
+  return [
+    `import { createWasmtimeHandler } from ${JSON.stringify(WASMTIME_RUNTIME_ID)};`,
     "",
+    "const route = createWasmtimeHandler({",
+    `  route: ${JSON.stringify(label)},`,
+    `  instances: ${JSON.stringify(instances)},`,
+    ...(requestsPerInstance === undefined
+      ? []
+      : [`  requestsPerInstance: ${JSON.stringify(requestsPerInstance)},`]),
+    `  target: ${JSON.stringify(precompiled.target)},`,
+    `  addon: ${url(addonFile(precompiled.target))},`,
+    `  component: ${url(machineCodeFile(precompiled))},`,
+    ...(outbound === undefined ? [] : [`  outbound: ${JSON.stringify(outbound)},`]),
+    "});",
+    "",
+    ...ROUTE_EXPORTS,
   ].join("\n");
 }
 
@@ -124,12 +207,12 @@ export function createRouteModule(
  * web-standard fetch handler.
  */
 export function polyroute(options: PolyrouteOptions = {}): Plugin {
-  const { instances, outbound } = resolveOptions(options);
+  const { instances, outbound, runtime } = resolveOptions(options);
   let config: ResolvedConfig;
   const bindings = new Map<string, string>();
   // Route modules a build loads, by module ID, so their core modules can be
   // written next to whichever chunk each one ends up in.
-  const builtRoutes = new Map<string, TranspiledRoute>();
+  const builtRoutes = new Map<string, TranspiledRoute | PrecompiledRoute>();
 
   return {
     name: "polyroute",
@@ -137,12 +220,20 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
 
     configResolved(resolved) {
       config = resolved;
+      if (runtime === "wasmtime" && config.command === "serve") {
+        config.logger.info(
+          'polyroute: `experimental.runtime: "wasmtime"` applies to `vite build`. Dev serves routes with jco.',
+        );
+      }
     },
 
     resolveId: {
-      filter: { id: [/^@farming-labs\/polyroute\/runtime$/, /^virtual:polyroute\//] },
+      filter: {
+        id: [/^@farming-labs\/polyroute\/runtime(?:\/wasmtime)?$/, /^virtual:polyroute\//],
+      },
       handler(id) {
-        if (id === RUNTIME_ID) return runtimeEntry();
+        if (id === RUNTIME_ID) return runtimeEntry("index");
+        if (id === WASMTIME_RUNTIME_ID) return runtimeEntry("wasmtime");
         return `\0${id}`;
       },
     },
@@ -178,9 +269,21 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
 
         const cacheDir = path.join(config.cacheDir, "polyroute");
         const started = performance.now();
-        const { wasm, sources } = await language.build({ routeFile, label, cacheDir });
+        const buildRuntime = config.command === "build" ? runtime : "jco";
+        const { wasm, sources } = await language.build({
+          routeFile,
+          label,
+          cacheDir,
+          runtime: buildRuntime,
+        });
         for (const source of sources) this.addWatchFile(source);
-        const transpiled = await transpileRoute(wasm, label, cacheDir, language.handlerHint);
+        const transpiled = await transpileRoute(
+          wasm,
+          label,
+          cacheDir,
+          language.handlerHint,
+          buildRuntime,
+        );
         if (transpiled.outbound && outbound === undefined) {
           throw new PolyrouteError(
             "OUTBOUND_NOT_ALLOWED",
@@ -192,6 +295,17 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
           `polyroute: built ${label} (${(wasm.byteLength / 1024).toFixed(0)} KiB) in ${Math.round(performance.now() - started)} ms`,
           { timestamp: true },
         );
+        if (runtime === "wasmtime" && config.command === "build") {
+          const precompiled = await precompileRoute(wasm, label, cacheDir);
+          builtRoutes.set(id, precompiled);
+          return createWasmtimeRouteModule(
+            label,
+            precompiled,
+            instances,
+            language.requestsPerInstance,
+            transpiled.outbound ? outbound : undefined,
+          );
+        }
         const coreModuleFiles = config.command === "build";
         if (coreModuleFiles) builtRoutes.set(id, transpiled);
         return createRouteModule(
@@ -215,14 +329,22 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
         for (const chunk of Object.values(bundle)) {
           if (chunk.type !== "chunk") continue;
           const dir = path.posix.dirname(chunk.fileName);
+          const emit = (file: string, source: () => Uint8Array) => {
+            const fileName = path.posix.join(dir, file);
+            if (emitted.has(fileName)) return;
+            emitted.add(fileName);
+            this.emitFile({ type: "asset", fileName, source: source() });
+          };
           for (const id of chunk.moduleIds) {
-            const transpiled = builtRoutes.get(id);
-            if (transpiled === undefined) continue;
-            for (const [name, encoded] of Object.entries(transpiled.coreModules)) {
-              const fileName = path.posix.join(dir, coreModuleFile(transpiled.key, name));
-              if (emitted.has(fileName)) continue;
-              emitted.add(fileName);
-              this.emitFile({ type: "asset", fileName, source: Buffer.from(encoded, "base64") });
+            const built = builtRoutes.get(id);
+            if (built === undefined) continue;
+            if ("file" in built) {
+              emit(machineCodeFile(built), () => readFileSync(built.file));
+              emit(addonFile(built.target), () => readFileSync(built.addonFile));
+              continue;
+            }
+            for (const [name, encoded] of Object.entries(built.coreModules)) {
+              emit(coreModuleFile(built.key, name), () => Buffer.from(encoded, "base64"));
             }
           }
         }

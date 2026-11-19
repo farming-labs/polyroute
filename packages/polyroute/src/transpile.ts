@@ -13,9 +13,10 @@ import {
   parseInterfaceName,
 } from "./interfaces.js";
 import { skipSyncTaskBookkeeping } from "./sync-imports.js";
+import type { Runtime } from "./plugin.js";
 
 /** Bump when the cached output format or the codegen contract changes. */
-const CACHE_FORMAT = 7;
+const CACHE_FORMAT = 8;
 
 // A route that sends outbound requests waits for responses in these imports.
 // JSPI lets them return a promise: V8 suspends the guest's stack, and resumes
@@ -89,9 +90,10 @@ export async function transpileRoute(
   label: string,
   cacheDir: string,
   handlerHint: string,
+  runtime: Runtime = "jco",
 ): Promise<TranspiledRoute> {
   const key = createHash("sha256")
-    .update(`${CACHE_FORMAT}\0${getTranspilerVersion()}\0`)
+    .update(`${CACHE_FORMAT}\0${getTranspilerVersion()}\0${runtime}\0`)
     .update(wasm)
     .digest("hex")
     .slice(0, 32);
@@ -131,7 +133,7 @@ export async function transpileRoute(
   }
 
   checkExports(result.exports, label, handlerHint);
-  checkImports(result.imports, label);
+  checkImports(result.imports, label, runtime);
 
   const decoder = new TextDecoder();
   let bindings: string | undefined;
@@ -167,8 +169,9 @@ function checkExports(exports: Array<[string, string]>, label: string, hint: str
   }
 }
 
-function checkImports(imports: string[], label: string): void {
+function checkImports(imports: string[], label: string, runtime: Runtime): void {
   const missing = imports
+    .filter((name) => runtime !== "wasmtime" || name !== "polyroute:route/native-http")
     .map((name) => parseInterfaceName(name).name)
     .filter((name) => !supported.has(name));
   if (missing.length === 0) return;

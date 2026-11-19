@@ -1,0 +1,2943 @@
+[
+  {
+    "allow": [],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": [""],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["*"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": true
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": true
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": true
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": true
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": true
+      }
+    ]
+  },
+  {
+    "allow": ["example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["EXAMPLE.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com."],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": [".example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["*.example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": true
+      }
+    ]
+  },
+  {
+    "allow": ["**.example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["*."],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com:80"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:443"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:080"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:0"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:65535"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:65536"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com:"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example.com:-1"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com:+80"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["[::1]"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": true
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": true
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["[::1]:80"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["[::1]:8080"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": true
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["::1"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["127.0.0.1"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": true
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["127.1"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": true
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["2130706433"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": true
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["0x7f000001"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": true
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["localhost"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": true
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["https://example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["user@example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com/path"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com?x"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com#x"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com\\x"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa*mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["éxample.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["xn--xample-9ua.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["%65xample.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["a_b.example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["example..com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["-"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["☃.example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": false
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": false
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": true
+      }
+    ]
+  },
+  {
+    "allow": ["\texample.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa\tmple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["\nexample.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa\nmple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["\u000bexample.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa\u000bmple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["\fexample.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa\fmple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["\rexample.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa\rmple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["᠎example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["exa᠎mple.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["​example.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["exa​mple.com"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": [" example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["　example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa　mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["﻿example.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["exa﻿mple.com"],
+    "valid": false,
+    "urls": []
+  },
+  {
+    "allow": ["example.com", "localhost:443"],
+    "valid": true,
+    "urls": [
+      {
+        "url": "http://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://example.com/",
+        "allowed": true
+      },
+      {
+        "url": "https://EXAMPLE.com/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:8080/",
+        "allowed": true
+      },
+      {
+        "url": "http://sub.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a.b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://badexample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com./",
+        "allowed": false
+      },
+      {
+        "url": "http://example.com:0/",
+        "allowed": true
+      },
+      {
+        "url": "http://example.com:65535/",
+        "allowed": true
+      },
+      {
+        "url": "http://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://[::1]:8080/",
+        "allowed": false
+      },
+      {
+        "url": "https://[::1]/",
+        "allowed": false
+      },
+      {
+        "url": "http://127.0.0.1/",
+        "allowed": false
+      },
+      {
+        "url": "http://localhost/",
+        "allowed": false
+      },
+      {
+        "url": "http://éxample.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://xn--xample-9ua.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://a_b.example.com/",
+        "allowed": false
+      },
+      {
+        "url": "http://☃.example.com/",
+        "allowed": false
+      }
+    ]
+  },
+  {
+    "allow": ["*", "http://example.com"],
+    "valid": false,
+    "urls": []
+  }
+]

@@ -17,8 +17,17 @@ export type PolyrouteErrorCode =
   | "MISSING_HANDLER"
   /** The compiled route couldn't be instantiated. */
   | "ROUTE_INSTANTIATION_FAILED"
-  /** The route sends HTTP requests, and this JavaScript runtime has no JSPI. */
+  /**
+   * The route sends HTTP requests, and this JavaScript runtime has no JSPI, or
+   * `experimental.runtime` doesn't support that yet.
+   */
   | "UNSUPPORTED_RUNTIME"
+  /**
+   * `experimental.runtime: "wasmtime"` can't run here: the addon is missing or
+   * built for another target, or a route's machine code is missing or doesn't
+   * match the addon.
+   */
+  | "RUNTIME_UNAVAILABLE"
   /** The route trapped, for example because the Rust code panicked. */
   | "ROUTE_TRAPPED"
   /** The route returned without setting a response. */

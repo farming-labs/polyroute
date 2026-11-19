@@ -1,6 +1,6 @@
 # RFC 0001: Compile routes ahead of time and run them natively
 
-Status: proposed, 2026-11-16. Prototype and measurement status updated 2026-11-18.
+Status: experimental implementation, 2026-11-18. Graduation and the broader serverless performance goal remain incomplete.
 
 ## Summary
 
@@ -127,14 +127,16 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 ### Prototype status
 
-[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the building machine and emits the addon and precompiled components beside the server. The default runtime remains jco. No new performance win or completed acceptance is claimed yet.
+[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the build machine's OS and architecture using baseline CPU features and emits the addon and precompiled components beside the server. [ADR 0019](../decisions/0019-native-cpu-baseline.md) records the provider CPU mismatch that prompted this default and cache change. Earlier host-tuned measurements do not establish performance for the rebuilt artifacts. The [current artifact comparison](../benchmarks/2026-11-18-native-runtime-cpu-baseline.md) establishes a local startup improvement over jco. The default remains jco; complete throughput and serverless acceptance remain unmet.
 
 The prototype differs from the proposed end state below:
 
-- `experimental.targets`, cross-compilation, prebuilt distribution, and a compiler-free deployment addon are not implemented. The private addon currently includes Cranelift for build-time compilation.
+- `experimental.targets`, cross-compilation, and prebuilt distribution are not implemented. The compiler-free deployment addon passed the full integration matrix in PR #23; Cranelift stays in its separate build-time binary.
 - Development still uses jco and reports this explicitly. Native development parity remains unimplemented.
 - Routes without outbound imports use the synchronous Node-API path. Outbound routes use Tokio workers and call the existing JavaScript HTTP host, enforcing its allowlist and cancellation. At most 32 requests per route run concurrently; excess calls wait. This also bounds native per-request mode.
-- Outbound Rust, Go, and Python integration passed on macOS with Node 24 at implementation commit `2f48eed`. The complete native workspace/packed smoke and cross-platform checks are still being verified. Passing these checks is separate from the throughput and cold-start acceptance below.
+- Outbound Rust, Go, and Python integration, workspace/packed smoke, and the full Linux/macOS/Windows matrix on Node 22 and 24 passed at `7daf491` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44295931880)). The compiler-free addon also passed this matrix at `d868f630` ([CI run](https://github.com/farming-labs/polyroute/actions/runs/44299249298)). Passing these checks is separate from the throughput and cold-start acceptance below.
+
+The [baseline CI benchmark report](../benchmarks/2026-11-18-native-runtime.md) and the [full comparison after the compiler split and Python transfer optimization](../benchmarks/2026-11-18-native-runtime-python-transfer.md) do not clear the throughput gate. Cold medians remain within the RFC’s allowance but higher than matched TypeScript. The later run completed every A/B and A/A report with zero reported errors and no discarded samples; the Linux relay still loses to jco at one connection, while Go and Python trail TypeScript at both connection counts on both runners. These runs use different environments and cannot establish a before/after optimization gain. The local compiler split reduced addon size by 62.4%; it did not establish a timing improvement and showed a Rust throughput loss that did not reproduce in a focused repeat. No serverless-provider measurement or completed acceptance is claimed.
 
 The proposed configuration and packaging below describe remaining design work; they are not currently supported APIs.
 
@@ -156,7 +158,7 @@ polyroute({
 ### Packages
 
 - **`@farming-labs/polyroute-wasmtime`** is a Node-API addon built with napi-rs on the `wasmtime` and `wasmtime-wasi-http` crates. It ships prebuilt binaries as per-platform optional dependencies and is an optional peer of `@farming-labs/polyroute`.
-- **The runtime build has no compiler.** The addon that gets deployed only deserializes `.cwasm` files, so it can leave Cranelift out. That should make it smaller (we haven't measured it), and a missing `.cwasm` can never turn into a JIT compile at cold start. The build step uses a build that includes Cranelift. Both builds pin one wasmtime version, because a `.cwasm` only loads in the wasmtime version that wrote it. wasmtime returns an error for any other version.
+- **The runtime build has no compiler.** The addon that gets deployed only deserializes `.cwasm` files, so it can leave Cranelift out. The local prototype measured a 62.4% smaller addon (see ADR 0005), and a missing `.cwasm` can never turn into a JIT compile at cold start. The build step uses a build that includes Cranelift. Both builds pin one wasmtime version, because a `.cwasm` only loads in the wasmtime version that wrote it. wasmtime returns an error for any other version.
 
 ### Build
 
@@ -194,7 +196,11 @@ Part 2 stays experimental until a prototype clears all of these on macOS arm64 a
 
 Use equivalent workloads, verified response bodies, equal connection counts, and the same Node version. Interleave A/B rounds and run A/A to measure noise. Record every sample, warmup settings, errors, median and p95, CPU/OS details, and artifact sizes. Do not discard losses or omit the outbound relay from smoke or performance acceptance.
 
-If the prototype misses these, we stop and keep part 1. Completing the integration suite alone does not justify merging the native runtime or claiming that it beats TypeScript.
+These remain the requirements for graduating the runtime. The revised rollout decision on 2026-11-18 permits this increment to merge as opt-in experimental functionality based on a demonstrated local startup improvement, while the broader work continues. The current CPU-baseline artifacts improve startup over jco, with all routes and both A/A controls retained in [the current report](../benchmarks/2026-11-18-native-runtime-cpu-baseline.md). This replaces the initial stop-before-merge rule. It does not establish complete acceptance or justify a claim that native execution beats TypeScript.
+
+### Incremental outcome
+
+The implementation keeps `experimental.runtime: "wasmtime"` off by default and leaves development on jco. Compiler-free output, native outbound policy enforcement, Python buffered transfers and CPU-baseline compilation pass the full integration matrix. The private Vercel probe now returns expected Rust, Go, Python and TypeScript responses, but its provider throughput and cold starts remain unmeasured. A public standalone deployment adapter and the isolated Go SDK changes are not integrated. No release or graduation to a stable default is part of this increment.
 
 ## Alternatives considered
 

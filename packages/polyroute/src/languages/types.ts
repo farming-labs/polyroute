@@ -1,3 +1,5 @@
+import type { Runtime } from "../plugin.js";
+
 export interface RouteBuildInput {
   /** Absolute path of the route file. */
   routeFile: string;
@@ -5,6 +7,8 @@ export interface RouteBuildInput {
   label: string;
   /** polyroute's directory inside Vite's cache directory. */
   cacheDir: string;
+  /** Runtime the built component must link against. Development uses jco. */
+  runtime?: Runtime;
 }
 
 export interface RouteBuildResult {

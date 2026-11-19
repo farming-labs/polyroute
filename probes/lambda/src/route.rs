@@ -1,0 +1,142 @@
+use anyhow::Context as _;
+use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Manifest {
+    component: std::path::PathBuf,
+    #[serde(default)]
+    per_request: bool,
+    #[serde(default)]
+    requests_per_instance: u32,
+    outbound_allow: Option<Vec<String>>,
+    authority: Option<String>,
+}
+
+struct NativeRoute {
+    synchronous: Mutex<Worker>,
+    template: Mutex<Worker>,
+    idle: Mutex<Vec<Worker>>,
+    permits: Arc<Semaphore>,
+    outbound: Option<Arc<outbound::ClientState>>,
+    authority: Option<String>,
+    cancel: CancellationToken,
+}
+
+impl NativeRoute {
+    fn new(manifest: Manifest) -> anyhow::Result<Self> {
+        let worker = (|| -> wasmtime::Result<Worker> {
+            let engine = engine()?;
+            // SAFETY: this private probe loads only the recorded trusted build artifacts.
+            let component = unsafe { Component::deserialize_file(engine, &manifest.component) }?;
+            let mut linker = Linker::<Host>::new(engine);
+            wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+            wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker)?;
+            python_http::add_to_linker(&mut linker)?;
+            let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
+            Ok(Worker {
+                engine: engine.clone(),
+                pre,
+                per_request: manifest.per_request,
+                requests_per_instance: manifest.requests_per_instance,
+                slot: None,
+                stdout: Capture::default(),
+                stderr: Capture::default(),
+            })
+        })()
+        .map_err(|error| anyhow::Error::from_boxed(error.into_boxed_dyn_error()))?;
+        let outbound = manifest
+            .outbound_allow
+            .as_ref()
+            .map(|allow| outbound::ClientState::new(allow))
+            .transpose()?;
+        if let Some(authority) = &manifest.authority {
+            authority
+                .parse::<http::uri::Authority>()
+                .context("invalid authority override; supply host:port")?;
+        }
+        Ok(Self {
+            synchronous: Mutex::new(worker.fresh()),
+            template: Mutex::new(worker),
+            idle: Mutex::new(Vec::new()),
+            permits: Arc::new(Semaphore::new(32)),
+            outbound,
+            authority: manifest.authority,
+            cancel: CancellationToken::new(),
+        })
+    }
+
+    /// Runs one request through a guest. `headers` alternates names and
+    /// Latin-1 values, as the Node addon receives them.
+    async fn handle(
+        self: &Arc<Self>,
+        method: String,
+        url: String,
+        headers: Vec<String>,
+        body: Vec<u8>,
+    ) -> anyhow::Result<http::Response<Vec<u8>>> {
+        let result = if let Some(state) = &self.outbound {
+            let permit = self.permits.clone().acquire_owned().await?;
+            let route = self.clone();
+            let method = method.clone();
+            let outbound = OutboundContext {
+                state: state.clone(),
+                cancel: self.cancel.child_token(),
+            };
+            tokio::task::spawn_blocking(move || {
+                let mut worker = route
+                    .idle
+                    .lock()
+                    .unwrap()
+                    .pop()
+                    .unwrap_or_else(|| route.template.lock().unwrap().fresh());
+                let result = worker.handle(method, url, headers, body, Some(outbound));
+                route.idle.lock().unwrap().push(worker);
+                drop(permit);
+                result
+            })
+            .await?
+        } else {
+            tokio::task::block_in_place(|| {
+                self.synchronous
+                    .lock()
+                    .unwrap()
+                    .handle(method.clone(), url, headers, body, None)
+            })
+        };
+        use std::io::Write as _;
+        std::io::stdout().write_all(&result.stdout)?;
+        std::io::stderr().write_all(&result.stderr)?;
+        anyhow::ensure!(
+            result.outcome == "ok",
+            "{}: {}",
+            result.outcome,
+            result.message.unwrap_or_default()
+        );
+        anyhow::ensure!(
+            result.status >= 200,
+            "invalid final status {}; return a final HTTP status",
+            result.status
+        );
+        let mut response = http::Response::builder().status(result.status);
+        for [name, value] in result.headers.as_chunks::<2>().0 {
+            if name == "content-length" {
+                let length: usize = value
+                    .parse()
+                    .context("invalid content-length; send a decimal byte count")?;
+                anyhow::ensure!(
+                    length == result.body.len(),
+                    "content-length mismatch; declare the actual body size"
+                );
+            }
+            response = response.header(name, latin1_bytes(value));
+        }
+        let body = if method == "HEAD" || matches!(result.status, 204 | 205 | 304) {
+            Vec::new()
+        } else {
+            result.body
+        };
+        Ok(response.body(body)?)
+    }
+}

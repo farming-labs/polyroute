@@ -37,6 +37,9 @@ importers:
         specifier: ^0.24.0
         version: 0.24.0
     devDependencies:
+      '@farming-labs/polyroute-wasmtime':
+        specifier: workspace:*
+        version: link:../polyroute-wasmtime
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -49,6 +52,8 @@ importers:
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5))
+
+  packages/polyroute-wasmtime: {}
 
 packages:
 

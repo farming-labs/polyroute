@@ -103,3 +103,24 @@ it("rebuilds a Python route when a module next to it changes", async () => {
     "hello from an edited sibling\n",
   );
 });
+
+it("keeps Python portable in dev when the native build runtime is selected", async () => {
+  const nativeBuildServer = await createServer({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    cacheDir,
+    plugins: [polyroute({ experimental: { runtime: "wasmtime" } })],
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  try {
+    const module = (await nativeBuildServer.ssrLoadModule("/py/route.py")) as {
+      default: WasiHttpRoute;
+    };
+    const response = await module.default.fetch(new Request("http://localhost/native-dev"));
+    expect(await response.text()).toContain("method=GET\npath=/native-dev\n");
+  } finally {
+    await nativeBuildServer.close();
+  }
+});

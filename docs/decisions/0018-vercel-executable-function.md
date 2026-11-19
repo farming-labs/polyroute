@@ -1,0 +1,42 @@
+# 0018: Serve the standalone native host as a Vercel executable function
+
+Status: implemented as a private probe, 2026-11-18. Linux bridge and Build Output checks pass. After the CPU-baseline fix in ADR 0019, the rebuilt preview passes all six basic native/TypeScript provider response checks. No public deployment target or provider performance measurement.
+
+## Problem and scope
+
+The Node addon starts Node before loading Wasmtime. Local and CI comparisons motivate testing a standalone host for serverless; they do not establish Vercel performance. Each request pays a fixed cost to enter Wasmtime: about 11 µs for a trivial Rust route and about 72 µs for Go, measured by calling `Route.handle` directly on macOS arm64. On CI's Linux x64 runners at ten connections, a trivial Rust route serves 6,552 req/s against TypeScript's 14,800, and every non-TypeScript cold start is 3–10 ms slower than TypeScript's.
+
+The standalone native host (ADR 0010) doesn't start Node. Locally it starts in 5–12 ms against TypeScript's ~49 ms, and Rust handles compute-heavy routes at 1.4–1.7× TypeScript's req/s. The user chose this host as the target. This ADR covers the next boundary: running it as a Vercel function.
+
+## Decisions
+
+- Use Vercel's official Rust bridge, `vercel_runtime` 2.4.1, pinned with the locked dependencies. It runs an HTTP/1.1 server on `127.0.0.1`, reports readiness and request completion over `VERCEL_IPC_PATH`, and serves concurrent requests on Fluid compute. Don't reimplement the IPC protocol.
+- Emit what Vercel's own Rust builder emits for a function that depends on `vercel_runtime`: one `executable` file, with `.vc-config.json` setting `"runtime": "executable"`, `"handler": "executable"`, `"architecture": "x86_64"`, `"supportsResponseStreaming": true` and `"runtimeLanguage": "rust"`. Don't use the builder's standalone mode, which puts an extra proxy process in front of the server.
+- Add a second binary to the existing private probe crate. It includes the same `core.rs` and `outbound.rs` as the Lambda binary, and both binaries share one transport-neutral route layer: manifest loading, worker reuse, Go's 1,000-request replacement, trap retirement, the outbound policy, and response validation. Each adapter only decodes its transport and encodes the response.
+- Pass HTTP header bytes through as Latin-1, matching the Node addon's wire contract. Build the guest URL from the request's `Host` header and `x-forwarded-proto`. Strip Vercel's internal `x-vercel-internal-*` headers before the guest sees the request.
+- Fail closed without leaking internals. On a trap, an invalid response, or an adapter error, return `500 Internal Server Error` with that plain body, write the cause to stderr, and keep serving. Don't use `vercel_runtime`'s default error body, which includes the error text.
+- Load one trusted precompiled component from a manifest beside the executable. Missing or incompatible artifacts fail at startup, before readiness is reported.
+
+## Alternatives and consequences
+
+The Lambda probe's Runtime API adapter doesn't apply. Vercel invokes `executable` functions through its own bridge, not Lambda's event loop. Vercel's standalone mode would run the host unchanged but adds a proxy hop on every request. Staying on Node keeps the measured losses.
+
+This doesn't change the published packages or public options. A later production change must turn the probe into a build output from the Vite plugin and needs its own review.
+
+## Verification plan
+
+Run Rust formatting, Clippy and tests for both binaries. Run the shared guest cases from `cases.mjs` against the real Vercel binary over HTTP, with a local unix-socket server standing in for Vercel's bridge. Require a `server-started` message before the first request and one `end` message per request, keyed by the request's invocation and request IDs. Cover startup failure before readiness and shutdown on `SIGTERM`. Re-run the Lambda probe's protocol suite to show the shared route layer didn't change its behavior. Linux packaging follows the Lambda probe's pinned Amazon Linux build.
+
+Deploying needs a Vercel project and the user's explicit approval. Only a deployed, matched comparison against an equivalent TypeScript function can establish provider cold-start or req/s results.
+
+## Verification evidence
+
+[CI run 44374971737](https://github.com/farming-labs/polyroute/actions/runs/44374971737) built both binaries on Amazon Linux and passed formatting, Clippy, seven Lambda Rust tests and six Vercel Rust tests. The Lambda protocol fixture passed 23 groups and 1,103 invocations; the AWS emulator passed twenty groups and 1,101 invocations. The Vercel bridge passed 24 groups and 1,103 requests, with one matching end message per request. Its non-Latin-1 HTTP-header case is skipped, not passed.
+
+The job then failed before writing the Build Output: `mkdir` returned `ENOENT` because the requested output's parent directory did not exist. The packager now creates missing parents but still requires the output directory itself to be new. Its Vite import uses a file URL so the packaging tests can also run on Windows. The real-filesystem regression reproduces `ENOENT` before the fix and passes afterward; a separate test verifies that an existing output and its contents remain untouched. These tests use synthetic ELF/component bytes and establish packaging behavior only. Both pass locally on Node 22.13.0 and Node 24.21.0; all fourteen script tests pass on Node 24.21.0.
+
+[CI run 44395448679](https://github.com/farming-labs/polyroute/actions/runs/44395448679) passes all ten jobs, including Linux/macOS/Windows on Node 22/24, both Rust feature sets and the private probe. The probe retains the protocol counts above and verifies the exact bodies of the three native benchmark functions against their TypeScript twins. Artifact `14470416952` has SHA-256 `9f1af8274c1c6d3a21f0a1b8dc73c3d3c81b5c29ae3c41e10baa44a141e98664`. The download audit verified all nineteen Build Output files against the manifest and restored their recorded executable modes before upload.
+
+With the user's deployment authorization, this output was uploaded to the dedicated farming-labs `polyroute-native-probe` project. Deployment `dpl_DeuNzbXghDa3v9SCQbK2vrZyfPbC` reached READY, but `/api/primes?limit=10000` returned `500 FUNCTION_INVOCATION_FAILED`: Wasmtime rejected `route.cwasm` because the build enabled AVX-512 BITALG and the provider CPU lacked it. Timing stopped at that failure. [ADR 0019](0019-native-cpu-baseline.md) fixes the shared compiler default and invalidates the old cache; the rebuilt provider invocation remains a separate verification gate.
+
+Authenticated requests to all three TypeScript twins on that first deployment return HTTP 200 with the expected JSON: primes below 10,000, the slug of `hello`, and statistics for `[1,2,3,4]`. The subsequent CPU-baseline rebuild passes the same checks for all three native functions and their TypeScript twins on preview `dpl_HBuJcT1HM6baj5u3VDW3HYgEYxBj`. [ADR 0019](0019-native-cpu-baseline.md) records the source, CI run, artifact digest and file audit. These are provider correctness checks only; matched provider timings remain unverified.

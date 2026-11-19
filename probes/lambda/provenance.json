@@ -1,0 +1,23 @@
+{
+  "sourceCommit": "9c3811072ee3e99c4f0f58492955b644818838ac",
+  "productionSources": [
+    {
+      "file": "packages/polyroute-wasmtime/src/lib.rs",
+      "sha256": "8ecf67a0b4cc19cad05a9daab59dd558ca3a4834093ae5972bb70059f3da1b7a"
+    },
+    {
+      "file": "packages/polyroute-wasmtime/src/python_http.rs",
+      "sha256": "c4ee60eaa3971a9dfee0dc93ff0fcd1fc4efbc2f6e48629b51b56fbdd176aba0"
+    },
+    {
+      "file": "packages/polyroute/src/runtime/outbound.ts",
+      "sha256": "74e42949d2ce6f744ca4857aafb73d8808eadcab59d4dcda32e2446004d34f4c"
+    }
+  ],
+  "limits": [
+    "Private standalone extraction; not production integration.",
+    "The Node-API wrapper is removed; native outbound uses the same tested policy contract.",
+    "Python resources reuse the production source directly.",
+    "ADR 0019 re-reviews the compiler CPU baseline change; extracted worker behavior and runtime compatibility checks are unchanged."
+  ]
+}

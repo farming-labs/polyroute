@@ -11,6 +11,8 @@ A small Node server with a route in each of TypeScript, Rust, Go, and Python, al
 | `GET /api/slug?text=...`  | `app/api/slug/route.go`   | Turns text into a URL slug                        |
 | `POST /api/stats`         | `app/api/stats/route.py`  | Returns the count, mean, and median of numbers    |
 
+The `primes-ts`, `slug-ts`, `stats-ts`, and `relay-ts` routes provide TypeScript counterparts for `node scripts/bench.mjs --matched`. The benchmark sends the same payload to each pair and checks the same response bytes. The slug comparison uses ASCII text, and the statistics comparison uses `[1, 2, 3, 4]`; these fixtures do not claim identical Unicode or floating-point behavior for arbitrary inputs across languages.
+
 Building it needs Rust with the `wasm32-wasip2` target, Go 1.27.1 or newer, and componentize-py (see the [quick start](../../README.md#quick-start)). Running the built server needs only Node.
 
 Run it from the repository root after `pnpm install`:
@@ -38,3 +40,5 @@ pnpm --filter polyroute-example-polyglot start
 ```
 
 `src/app.ts` is the router, `src/server.ts` the production entry, and `dev.js` the dev server. The Go route has its own `go.mod`, because componentize-go builds from the module root.
+
+For the experimental native runtime, build the addon from the repository root with `pnpm --filter @farming-labs/polyroute-wasmtime build`, then build this example with `pnpm build --mode wasmtime`. It uses the same routes and outbound allowlist. Run the root `pnpm smoke --runtime wasmtime` and `pnpm smoke:packed --runtime wasmtime` commands to check both package layouts.

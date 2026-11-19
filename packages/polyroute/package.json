@@ -38,6 +38,10 @@
       "types": "./dist/runtime/index.d.ts",
       "default": "./dist/runtime/index.js"
     },
+    "./runtime/wasmtime": {
+      "types": "./dist/runtime/wasmtime.d.ts",
+      "default": "./dist/runtime/wasmtime.js"
+    },
     "./modules": {
       "types": "./modules.d.ts"
     },
@@ -52,13 +56,20 @@
     "@bytecodealliance/jco-transpile": "^0.24.0"
   },
   "devDependencies": {
+    "@farming-labs/polyroute-wasmtime": "workspace:*",
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
   "peerDependencies": {
+    "@farming-labs/polyroute-wasmtime": "workspace:*",
     "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@farming-labs/polyroute-wasmtime": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22"
