@@ -1,6 +1,6 @@
 # RFC 0001: Compile routes ahead of time and run them natively
 
-Status: proposed, 2026-11-16. Prototype and measurement status updated 2026-11-18.
+Status: experimental implementation, 2026-11-18. Graduation and the broader serverless performance goal remain incomplete.
 
 ## Summary
 
@@ -127,7 +127,7 @@ At one connection, which is how a serverless instance sees traffic, a light Rust
 
 ### Prototype status
 
-[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the build machine's OS and architecture using baseline CPU features and emits the addon and precompiled components beside the server. [ADR 0019](../decisions/0019-native-cpu-baseline.md) records the provider CPU mismatch that prompted this default and cache change. Earlier host-tuned measurements do not establish performance for the rebuilt artifacts. The default runtime remains jco. No new performance win or completed acceptance is claimed yet.
+[PR #23](https://github.com/farming-labs/polyroute/pull/23) implements a private Wasmtime 50.0.2 addon for Rust, Go, and Python. It compiles for the build machine's OS and architecture using baseline CPU features and emits the addon and precompiled components beside the server. [ADR 0019](../decisions/0019-native-cpu-baseline.md) records the provider CPU mismatch that prompted this default and cache change. Earlier host-tuned measurements do not establish performance for the rebuilt artifacts. The [current artifact comparison](../benchmarks/2026-11-18-native-runtime-cpu-baseline.md) establishes a local startup improvement over jco. The default remains jco; complete throughput and serverless acceptance remain unmet.
 
 The prototype differs from the proposed end state below:
 
@@ -196,7 +196,11 @@ Part 2 stays experimental until a prototype clears all of these on macOS arm64 a
 
 Use equivalent workloads, verified response bodies, equal connection counts, and the same Node version. Interleave A/B rounds and run A/A to measure noise. Record every sample, warmup settings, errors, median and p95, CPU/OS details, and artifact sizes. Do not discard losses or omit the outbound relay from smoke or performance acceptance.
 
-If the prototype misses these, we stop and keep part 1. Completing the integration suite alone does not justify merging the native runtime or claiming that it beats TypeScript.
+These remain the requirements for graduating the runtime. The revised rollout decision on 2026-11-18 permits this increment to merge as opt-in experimental functionality based on a demonstrated local startup improvement, while the broader work continues. The current CPU-baseline artifacts improve startup over jco, with all routes and both A/A controls retained in [the current report](../benchmarks/2026-11-18-native-runtime-cpu-baseline.md). This replaces the initial stop-before-merge rule. It does not establish complete acceptance or justify a claim that native execution beats TypeScript.
+
+### Incremental outcome
+
+The implementation keeps `experimental.runtime: "wasmtime"` off by default and leaves development on jco. Compiler-free output, native outbound policy enforcement, Python buffered transfers and CPU-baseline compilation pass the full integration matrix. The private Vercel probe now returns expected Rust, Go, Python and TypeScript responses, but its provider throughput and cold starts remain unmeasured. A public standalone deployment adapter and the isolated Go SDK changes are not integrated. No release or graduation to a stable default is part of this increment.
 
 ## Alternatives considered
 

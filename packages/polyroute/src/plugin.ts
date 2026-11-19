@@ -39,10 +39,10 @@ export interface PolyrouteOptions {
  * - `"jco"` (default): jco transpiles each route to JavaScript that runs its
  *   core modules in the JavaScript engine's WebAssembly.
  * - `"wasmtime"`: `vite build` compiles each route to machine code for the
- *   building machine, and the server runs it in wasmtime through a Node-API
+ *   build OS and architecture's baseline CPU, and the server runs it through a Node-API
  *   addon. Needs the `@farming-labs/polyroute-wasmtime` package, and the server
- *   must run on the same OS and architecture as the build. Dev still uses jco,
- *   and routes that send HTTP requests aren't supported yet.
+ *   must run on the same OS and architecture as the build. Dev still uses jco.
+ *   Outbound requests follow the configured allowlist and are denied by default.
  */
 export type Runtime = "jco" | "wasmtime";
 

@@ -1,6 +1,6 @@
 # 0019: Compile native routes for the target CPU baseline
 
-Status: implemented, 2026-11-18. Local compiler/runtime, release-route and packed checks pass; rebuilt Linux/provider verification pending.
+Status: implemented, 2026-11-18. Local, packed and full CI checks pass. The rebuilt private Vercel probe passes basic native and TypeScript response checks; provider performance remains unmeasured.
 
 ## Problem
 
@@ -25,7 +25,7 @@ Disabling only AVX-512 BITALG would leave other builder-specific extensions enab
 - Run Rust formatting, Clippy and tests for both feature sets, the focused native route/cache tests, and existing production and packed checks in the Linux/macOS/Windows CI matrix.
 - Rebuild the private probe artifacts in Linux CI, retain their hashes, verify its Lambda/Vercel boundaries and redeploy to the dedicated project. Require real native and TypeScript responses before collecting any provider timings.
 
-Portable machine code does not establish serverless performance acceptance. Provider CPU availability, the response correctness checks and measured performance remain separate gates before merging.
+Portable machine code does not establish serverless performance acceptance. Provider compatibility, response correctness and measured performance remain separate requirements. RFC 0001 records the later decision to merge a demonstrated incremental improvement while keeping the runtime experimental.
 
 ## Local verification
 
@@ -44,4 +44,12 @@ On macOS arm64 with Rust 1.99.1 and Wasmtime 50.0.2, the new CPU regression firs
 - `pnpm smoke --runtime wasmtime` and `pnpm smoke:packed --runtime wasmtime`: fifteen real HTTP checks passed each, including outbound relay and compiler-free deployment validation. The packed run installs fresh tarballs outside the workspace.
 - `pnpm lint` and `pnpm fmt:check`: passed.
 
-These local checks do not establish Linux/provider compatibility or performance. The complete Linux/macOS/Windows matrix, private Linux probe rebuild and successful native provider invocation remain pending. No new timing comparison was run.
+## CI and provider verification
+
+[CI run 44428563548](https://github.com/farming-labs/polyroute/actions/runs/44428563548) passes all ten checks on `7e4ce3d68a3f8f8f23f512c6426e10aad301cb3c`: Linux/macOS/Windows on Node 22/24, both Rust feature sets, lint and the private Linux probe. The probe passes seven Lambda and six Vercel Rust tests, 23 SDK protocol groups with 1,103 invocations, twenty AWS emulator groups with 1,101 invocations, and 24 Vercel bridge groups with 1,103 requests and matching end messages. One non-Latin-1 header case is skipped, not passed. All six packaged functions pass matched response checks.
+
+Downloaded artifact `14486702487` matches GitHub's SHA-256 `303fe501682b5f75ab375c472f9129c86ac86644e5d0f65a3203dd498caf6358`. All nineteen Build Output files match the manifest, totaling 79,154,547 bytes. Their recorded modes were restored before upload. The native host SHA-256 remains `75874adc1075449fcca1333cbae58eb27479ff70b2b3538e6034e32c07edba74`, matching the failed deployment; the precompiled components changed.
+
+The protected preview `dpl_HBuJcT1HM6baj5u3VDW3HYgEYxBj` passes six actual provider requests: Rust primes below 10,000, the Go slug of `hello`, Python statistics for `[1,2,3,4]`, and each TypeScript twin return HTTP 200 with expected JSON. The optional-CPU startup failure did not recur. These establish basic response correctness on this deployment, not provider resource/deadline behavior or performance.
+
+The separate [current-artifact local startup comparison](../benchmarks/2026-11-18-native-runtime-cpu-baseline.md) retains 1,560 samples and both A/A controls. It establishes an incremental improvement over jco for Rust computation, Go and Python, while retaining the relay's wider control variation. It does not establish a warm-throughput or serverless-provider gain.

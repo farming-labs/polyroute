@@ -1,6 +1,6 @@
 # 0018: Serve the standalone native host as a Vercel executable function
 
-Status: implemented as a private probe, 2026-11-18. Linux bridge and Build Output checks pass. The first provider deployment reached READY but its first native invocation failed CPU compatibility checks; see ADR 0019. No public deployment target or provider performance measurement.
+Status: implemented as a private probe, 2026-11-18. Linux bridge and Build Output checks pass. After the CPU-baseline fix in ADR 0019, the rebuilt preview passes all six basic native/TypeScript provider response checks. No public deployment target or provider performance measurement.
 
 ## Problem and scope
 
@@ -39,4 +39,4 @@ The job then failed before writing the Build Output: `mkdir` returned `ENOENT` b
 
 With the user's deployment authorization, this output was uploaded to the dedicated farming-labs `polyroute-native-probe` project. Deployment `dpl_DeuNzbXghDa3v9SCQbK2vrZyfPbC` reached READY, but `/api/primes?limit=10000` returned `500 FUNCTION_INVOCATION_FAILED`: Wasmtime rejected `route.cwasm` because the build enabled AVX-512 BITALG and the provider CPU lacked it. Timing stopped at that failure. [ADR 0019](0019-native-cpu-baseline.md) fixes the shared compiler default and invalidates the old cache; the rebuilt provider invocation remains a separate verification gate.
 
-Authenticated requests to all three TypeScript twins on that deployment return HTTP 200 with the expected JSON: primes below 10,000, the slug of `hello`, and statistics for `[1,2,3,4]`. These are provider correctness checks only. Native success and matched timings remain unverified.
+Authenticated requests to all three TypeScript twins on that first deployment return HTTP 200 with the expected JSON: primes below 10,000, the slug of `hello`, and statistics for `[1,2,3,4]`. The subsequent CPU-baseline rebuild passes the same checks for all three native functions and their TypeScript twins on preview `dpl_HBuJcT1HM6baj5u3VDW3HYgEYxBj`. [ADR 0019](0019-native-cpu-baseline.md) records the source, CI run, artifact digest and file audit. These are provider correctness checks only; matched provider timings remain unverified.
