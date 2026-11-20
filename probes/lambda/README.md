@@ -12,6 +12,7 @@ On Linux with Docker, Node 24, pnpm, Rust with `wasm32-wasip2`, Go 1.27, and com
 pnpm install --frozen-lockfile
 pnpm --filter @farming-labs/polyroute-wasmtime build
 pnpm build
+python3 probes/lambda/package_test.py
 node probes/lambda/prepare.mjs --output /tmp/lambda-fixtures
 
 docker build --platform linux/amd64 --file probes/lambda/Dockerfile \
@@ -26,9 +27,9 @@ node probes/lambda/check-rie.mjs --packages /tmp/lambda-packages --output /tmp/l
 
 Use new output directories for each run. The package builder reads the host and component hashes, writes one function ZIP for each tested configuration, verifies the archive's exact file set, bytes and Unix modes, and extracts it into the named directory. The emulator runs that extracted directory read-only. Each package contains only `bootstrap`, `polyroute-lambda`, `manifest.json`, and `route.cwasm`; it contains no Node runtime, compiler, SDK source, or credentials. The bootstrap resolves its own directory, independent of the caller's working directory.
 
-The Docker build pins the AWS Amazon Linux 2023 image digest and Rust 1.99.1. It verifies the Rust bootstrap checksum, runs formatting, Clippy and seven Rust tests, then builds with locked dependencies. The final export contains the host, its checksum and its shared-library listing. The emulator uses the same pinned AWS base image. Package format tests use synthetic ELF headers and prove packaging behavior only; the emulator is the execution check for the real binary.
+The Docker build pins the AWS Amazon Linux 2023 image digest and Rust 1.99.1. It verifies the Rust bootstrap checksum, runs formatting, Clippy and seven Rust tests, then builds with locked dependencies. The final export contains the host, its checksum and its shared-library listing. The emulator uses the same pinned AWS base image. Package format tests use synthetic ELF headers and prove packaging behavior only; the emulator is the execution check for the real binary. The tests use Node to collect every route, instance mode and outbound policy requested by the shared cases, then require a matching extracted package and manifest. Go echo must have both reused and per-request archives.
 
-`check-runtime.mjs` exercises the real SDK through a local Runtime API fixture. `check-rie.mjs` runs the same twenty guest/HTTP groups through AWS's emulator. Shutdown cancellation, invalid startup manifests and rejected acknowledgements remain additional protocol-fixture checks. Neither harness measures cold start or throughput. Failed runs write their result reports and container logs; CI retains the packages and results for seven days. Test-created containers are removed by their exact IDs, and test servers are closed. Local output directories belong to the caller; retain them until the results are reviewed.
+`check-runtime.mjs` exercises the real SDK through a local Runtime API fixture. `check-rie.mjs` runs the shared guest/HTTP cases through AWS's emulator. Shutdown cancellation, invalid startup manifests and rejected acknowledgements remain additional protocol-fixture checks. Neither harness measures cold start or throughput. Failed runs write their result reports and container logs; CI retains the packages and results for seven days. Test-created containers are removed by their exact IDs, and test servers are closed. Local output directories belong to the caller; retain them until the results are reviewed.
 
 No AWS credentials are used. Emulator success is not a deployment claim: provider wire behavior, deadlines/resource limits, initialization error reporting, arm64, production integration, packed public packages, and matched provider performance remain separate requirements.
 
