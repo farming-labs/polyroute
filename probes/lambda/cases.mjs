@@ -34,6 +34,32 @@ export async function runCases({ fixture, check }) {
         );
       }),
     );
+    await check(`Go response write budget and recovery reuse=${!perRequest}`, () =>
+      fixture("go/echo/route.go", { perRequest }, async (h) => {
+        for (const length of [0, 4095, 4096, 4097, 1048576, 1048577]) {
+          const body = Buffer.alloc(length);
+          for (let index = 0; index < length; index++) body[index] = index % 256;
+          const response = await h.request("/write-budget?check=1", {
+            method: "POST",
+            headers: { "x-greeting": "budget" },
+            body,
+          });
+          assert.equal(response.status, 201);
+          assert.equal(response.headers["x-served-by"], "go");
+          assert.deepEqual(
+            response.bytes,
+            Buffer.concat([
+              Buffer.from(
+                "method=POST\npath=/write-budget?check=1\ngreeting=budget\nhello from a second file in the package\nbody=",
+              ),
+              body,
+              Buffer.from("\n"),
+            ]),
+          );
+        }
+        assert.equal((await h.request("/after-write")).status, 200);
+      }),
+    );
     await check(`Python bytes, cookies, retained body and validation reuse=${!perRequest}`, () =>
       fixture("python/response/route.py", { perRequest }, async (h) => {
         for (const n of [0, 1, 4095, 4096, 4097, 65535, 65536, 65537, 1048577]) {

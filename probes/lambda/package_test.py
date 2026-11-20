@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import struct
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,14 +46,48 @@ class PackagingTests(unittest.TestCase):
             packager.package(self.host, self.fixtures, self.root / "output")
 
     def test_echo_is_packaged_for_reuse_and_per_request_execution(self):
-        fixtures = {"echo/route.rs": self.fixtures["go/counter/route.go"]}
-        packages = packager.package(self.host, fixtures, self.root / "output")
-        self.assertEqual({item["perRequest"] for item in packages}, {False, True})
-        self.assertEqual(len(packages), 2)
-        for item in packages:
-            manifest = json.loads((self.root / "output" / item["directory"] / "manifest.json").read_text())
-            self.assertEqual(manifest["perRequest"], item["perRequest"])
-            self.assertEqual(manifest["requestsPerInstance"], 0)
+        for route, limit in [("echo/route.rs", 0), ("go/echo/route.go", 1000)]:
+            with self.subTest(route=route):
+                fixtures = {route: self.fixtures["go/counter/route.go"]}
+                output = self.root / f"output-{limit}"
+                packages = packager.package(self.host, fixtures, output)
+                self.assertEqual({item["perRequest"] for item in packages}, {False, True})
+                self.assertEqual(len(packages), 2)
+                for item in packages:
+                    manifest = json.loads((output / item["directory"] / "manifest.json").read_text())
+                    self.assertEqual(manifest["perRequest"], item["perRequest"])
+                    self.assertEqual(manifest["requestsPerInstance"], limit)
+
+    def test_every_shared_case_has_a_matching_extracted_package(self):
+        # Collect the actual cases' package requirements without executing guests.
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", """
+                import { runCases } from './cases.mjs';
+                const requirements = [];
+                await runCases({
+                    check: async (_name, run) => run(),
+                    fixture: async (route, options) => {
+                        requirements.push({route, perRequest: Boolean(options.perRequest),
+                            outboundAllow: options.outboundAllow ?? []});
+                    },
+                });
+                console.log(JSON.stringify(requirements));
+            """],
+            cwd=Path(__file__).parent, check=True, capture_output=True, text=True,
+        )
+        requirements = json.loads(result.stdout)
+        self.assertTrue(requirements)
+        fixtures = {item["route"]: self.fixtures["go/counter/route.go"] for item in requirements}
+        output = self.root / "shared-case-packages"
+        packages = packager.package(self.host, fixtures, output)
+        for required in requirements:
+            with self.subTest(required=required):
+                matching = [item for item in packages if all(item[key] == value for key, value in required.items())]
+                self.assertEqual(len(matching), 1, f"Missing or duplicate package: {required}")
+                manifest = json.loads((output / matching[0]["directory"] / "manifest.json").read_text())
+                self.assertEqual(manifest["perRequest"], required["perRequest"])
+                self.assertEqual(manifest.get("outboundAllow", []), required["outboundAllow"])
+                self.assertEqual(manifest["requestsPerInstance"], 1000 if required["route"].startswith("go/") else 0)
 
     def test_wrong_host_is_rejected(self):
         self.host.write_bytes(b"not ELF")

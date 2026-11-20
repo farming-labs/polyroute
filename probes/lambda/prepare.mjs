@@ -20,6 +20,7 @@ const sets = {
     routes: [
       "counter/route.rs",
       "go/counter/route.go",
+      "go/echo/route.go",
       "echo/route.rs",
       "python/response/route.py",
       "outbound/route.rs",
