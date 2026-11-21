@@ -1,6 +1,6 @@
 # 0022: Ship Vercel components compressed
 
-Status: implemented in the private probe, 2026-11-21. Measured on Vercel with a local cross-build of the host. No public option or package changes.
+Status: implemented in the private probe, 2026-11-21. Measured on Vercel with a local cross-build and with the Build Output CI built. No public option or package changes.
 
 ## Problem
 
@@ -23,13 +23,14 @@ The function file system reads compressible files slowly. Reading the raw 32 MB 
 - **Level 3** ties level 19 for Python and trails it for Go. It compresses about 70 times faster; level 19 adds about 9 s per 32 MB to a build on the M1 client, which a benchmark build can afford.
 - **Compressing the executable as well** wasn't tried. It would need a decompressing stub in front of the host, such as UPX.
 
-With level 19, Go beats its twin on demand (−56 ms paired, 9/10 previews). Python still loses, by 108 ms (2/10). The host-reported time explains less than half of the gain; the rest is spent before the host runs, so fewer deployed bytes may matter as much as fewer bytes read.
+On the Build Output CI built, native first requests on pre-started instances stayed ahead of their twins: −20, −5 and −17 ms paired (Rust, Go, Python), with the same guest time as before. On demand, Rust and Go beat their twins (−152 and −30 ms) and Python lost by 80 ms (2/8 previews). Until Python wins on demand too, native routes still miss the cold-start target on Vercel. The host-reported time explains less than half of the level comparison's gain; the rest is spent before the host runs, so fewer deployed bytes may matter as much as fewer bytes read.
 
 ## Verification
 
 - The Vercel Rust tests require a `.zst` file without a recorded size, a non-zstd `.zst` file and a missing `.zst` file to fail, each naming the problem.
 - The Vercel bridge suite requires compressed Rust, Go and Python components to serve the same two responses as the raw ones, and a non-zstd `.zst` file to stop the host before readiness. It passed against the macOS host before this change was rebased onto ADR 0021's; CI runs it against the Linux host.
 - The packaging test requires each native function to contain `route.cwasm.zst` that decompresses to the original bytes and a manifest naming it. It fails against the previous build script.
-- On Vercel, all 100 requests of the revisit returned the expected bodies.
+- CI run `44929704588` passed all ten jobs at `4f8cd9c`, including the Linux bridge suite and the Build Output check, which starts the real host on `route.cwasm.zst`.
+- That run's Build Output, deployed unchanged except for `serverTiming`, served every first, warm and on-demand request with the expected body on eight previews.
 
-Not verified: a Build Output written by `build-vercel-output.mjs` itself on Vercel, pre-started first requests with compressed components, Rust on demand, Lambda, and arm64.
+Not verified: Lambda and arm64.
