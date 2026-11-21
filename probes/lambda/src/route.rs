@@ -165,12 +165,30 @@ impl NativeRoute {
             })
             .await?
         } else {
-            tokio::task::block_in_place(|| {
-                self.synchronous
-                    .lock()
-                    .unwrap()
-                    .handle(method.clone(), url, headers, body, None)
+            // Synchronous guest calls run one at a time, and this one holds the
+            // runtime's only worker until it returns. Vercel sends concurrent
+            // requests to an instance until it stops answering `/_vercel/ping`
+            // promptly, as a Node instance does while it runs a request.
+            // `block_in_place` handed the runtime to another thread that kept
+            // answering, so Vercel queued requests behind the guest instead of
+            // starting another instance. The guest runs on its own thread,
+            // outside the runtime, where Wasmtime's synchronous imports use
+            // wasmtime-wasi's runtime.
+            let guest_method = method.clone();
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(move || {
+                        self.synchronous.lock().unwrap().handle(
+                            guest_method,
+                            url,
+                            headers,
+                            body,
+                            None,
+                        )
+                    })
+                    .join()
             })
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
         };
         use std::io::Write as _;
         std::io::stdout().write_all(&result.stdout)?;
