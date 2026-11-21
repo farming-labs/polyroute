@@ -54,15 +54,19 @@ test("Vercel packaging creates missing output parents and preserves artifact byt
   const { output, host, component, run } = await fixture(t);
   await run();
   assert.deepEqual(JSON.parse(await readFile(path.join(output, "config.json"))), { version: 3 });
-  assert.deepEqual((await readdir(path.join(output, "functions/api"))).sort(), [
-    "primes-ts.func",
-    "primes.func",
-    "slug-ts.func",
-    "slug.func",
-    "stats-ts.func",
-    "stats.func",
-    "warmup.func",
-  ]);
+  assert.deepEqual(
+    (await readdir(path.join(output, "functions/api"))).sort(),
+    [
+      "primes-ts.func",
+      "primes.func",
+      "slug-ts.func",
+      "slug.func",
+      "stats-ts.func",
+      "stats.func",
+      "load.func",
+      "warmup.func",
+    ].sort(),
+  );
   for (const name of ["primes", "slug", "stats"]) {
     const native = path.join(output, "functions/api", `${name}.func`);
     assert.deepEqual(await readFile(path.join(native, "executable")), host);
@@ -77,6 +81,13 @@ test("Vercel packaging creates missing output parents and preserves artifact byt
   const response = GET();
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "warm\n");
+  const loadFunction = fileURLToPath(
+    new URL("../probes/lambda/load-function.mjs", import.meta.url),
+  );
+  assert.deepEqual(
+    await readFile(path.join(output, "functions/api/load.func/index.mjs")),
+    await readFile(loadFunction),
+  );
 });
 
 test("Vercel packaging refuses an existing output without changing its contents", async (t) => {
