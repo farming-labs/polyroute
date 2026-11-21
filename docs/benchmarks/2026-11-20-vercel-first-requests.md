@@ -56,14 +56,17 @@ Guest time is the median on the first request. Every one of these instances was 
 | Same, eight parallel readers                                 |             0.7 |           1.1 |               3.5 |                              152 / 549 / 1,003 |
 | `posix_fadvise(WILLNEED)` both, instantiate                  |            16.9 |          25.8 |             143.0 |                                   10 / 16 / 16 |
 
-Seven more previews read only one section of the component. Neither section alone came close to the whole file:
+Seven more previews read only one section of the component. Neither section alone came close to the whole file on pre-started instances, and on demand, after 45 idle minutes, every read cost more than it saved:
 
-| Read before readiness      | Go guest (ms) | Python guest (ms) | Read, Go / Python (ms) |
-| -------------------------- | ------------: | ----------------: | ---------------------: |
-| Nothing (instantiate only) |          25.6 |             148.2 |                      — |
-| `.rodata.wasm`             |          23.0 |              74.8 |                22 / 92 |
-| `.text`                    |          15.9 |              89.1 |               73 / 115 |
-| Whole component            |          11.8 |              15.5 |              114 / 259 |
+| Read before readiness      | Go guest (ms) | Python guest (ms) | Read, Go / Python (ms) | On demand, Go / Python (ms) |
+| -------------------------- | ------------: | ----------------: | ---------------------: | --------------------------: |
+| Nothing (instantiate only) |          25.6 |             148.2 |                      — |                   576 / 753 |
+| `.rodata.wasm`             |          23.0 |              74.8 |                22 / 92 |                   599 / 759 |
+| `.text`                    |          15.9 |              89.1 |               73 / 115 |                   571 / 845 |
+| Whole component            |          11.8 |              15.5 |              114 / 259 |                   633 / 862 |
+| TypeScript twin            |             — |                 — |                      — |                   587 / 557 |
+
+The on-demand column has seven samples per cell. One request in it reached a Go function four minutes early, when a full disk stopped the client; the instance that served the measured request still reported an on-demand start.
 
 Reading the component alone leaves the host executable's pages to fault in during the first request, which was enough to tie TypeScript (next sections). Parallel readers take three times as long to read, and `fadvise` doesn't help at all.
 
@@ -92,13 +95,15 @@ With the path warmed, the TypeScript twins' first requests took 12–24 ms more 
 | Go       |                      129 |                          131 |                                     −5 |        6/12 |                          11.4 |
 | Python   |                      129 |                          124 |                                     −1 |        6/12 |                          11.4 |
 
-Reading the executable as well took that off the request. On five previews of the executable-and-component CI host, native first requests beat their twins' medians and won four of five paired rounds per language:
+Reading the executable as well took that off the request. Seven previews ran the executable-and-component host: five of CI artifact `14693247977` and two of CI artifact `14696144156`, built at `529a071` with a byte-identical host. Native first requests beat their twins' medians and won six of seven paired rounds per language:
 
 | Function | Native first median (ms) | TypeScript first median (ms) | Paired native − TypeScript median (ms) | Native wins | Native guest time median (ms) |
 | -------- | -----------------------: | ---------------------------: | -------------------------------------: | ----------: | ----------------------------: |
-| Rust     |                      127 |                          136 |                                    −15 |         4/5 |                           0.7 |
-| Go       |                      124 |                          143 |                                    −23 |         4/5 |                           1.4 |
-| Python   |                      121 |                          134 |                                    −17 |         4/5 |                           4.4 |
+| Rust     |                      126 |                          136 |                                    −13 |         6/7 |                           0.7 |
+| Go       |                      119 |                          140 |                                    −23 |         6/7 |                           1.4 |
+| Python   |                      121 |                          134 |                                    −17 |         6/7 |                           4.4 |
+
+The run of `529a071` was meant to cover twelve previews. A full disk on the client stopped it during the third with curl exit 23, so only its two complete rounds count.
 
 ## On-demand instances
 
@@ -135,13 +140,14 @@ Sample files are kept outside the repository. Their SHA-256 digests:
 - `fadvise`, six rounds: `7edcce52d41a09cbf9b1ca01d910ca027f1204e9f066c97043ad790a792c05be`; its revisit: `44dbb2f5dee2239c13241053cbc72f33ec8c86c24a20cc4a00c2f83ac26a431a`.
 - Executable-and-component CI host, ten rounds with a 30-second wait: `fcec67f30bdfb1687877c8972676b3407506c57718c5a380e8821f858b8242e6`; its revisit: `e0dee1a13308942b32424ed586a78296c461cf8e351659ae02a75d4597e35e96`.
 - The same host with the warmed path, five complete rounds: `23553bb2cc42a39247bae40f87a3c2afdd680617901e540c1536287e876db4cf`.
-- Sections, seven rounds: `d91e9969d70a214b61fe4d1453a1c56a1c80c47ee5fabeb39df7e10bc58a578f`.
+- The same host built at `529a071`, two complete rounds: `28b0c5d23d6179e3eef8df30d78bc633088f8725046b43c6ea724f9d0f4839f2`.
+- Sections, seven rounds: `d91e9969d70a214b61fe4d1453a1c56a1c80c47ee5fabeb39df7e10bc58a578f`; its revisit: `dc31407d53a62c32316c5741d3d9f2df16e8466e01a79132a92199ec6448cda5`.
 - Component-only CI host with the warmed path, twelve rounds: `d5953a14171bc984fb5bc945d4a7bfcc3b78432fbe3e803c5c8c7c61ab923bbd`.
 
 ## Limits
 
-- This is one region, one client and one project, with 5–14 previews per comparison and 8–30 samples per on-demand cell.
+- This is one region, one client and one project, with 6–14 previews per comparison and 8–30 samples per on-demand cell.
 - The startup variants ran on local cross-builds; the CI-built hosts confirm the executable-and-component and final behaviors.
 - Client load varied, and the round trip from this client (~110 ms) dominates every warm request, so these runs can't compare warm throughput.
 - Server-Timing comes from the native host only; the TypeScript twins report nothing about their own startup.
-- The disk filled twice during these runs. Both times a run stopped with curl exit 23 before writing a sample, so those runs report only their complete rounds.
+- The client's disk filled several times during these runs. Each time a run stopped with curl exit 23, and only its complete rounds count. One stopped request reached a function, as noted under the section table.
