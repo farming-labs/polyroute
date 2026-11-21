@@ -38,12 +38,41 @@ struct NativeRoute {
     startup: Mutex<Option<Startup>>,
 }
 
+/// Loads a precompiled component. A `.zst` file is decompressed into memory
+/// first. Vercel's function file system stores files compressed and measured
+/// about 115 MB/s reading a raw component, against about 270 MB/s for the same
+/// component already compressed with zstd.
+fn load_component(engine: &Engine, path: &std::path::Path) -> wasmtime::Result<Component> {
+    if path.extension().is_some_and(|extension| extension == "zst") {
+        let compressed = std::fs::read(path)
+            .map_err(|error| wasmtime::format_err!("couldn't read {}: {error}", path.display()))?;
+        let size = match zstd::zstd_safe::get_frame_content_size(&compressed) {
+            Ok(Some(size)) => size,
+            Ok(None) => wasmtime::bail!(
+                "{} doesn't record its decompressed size; compress it with the size included, as the `zstd` command does",
+                path.display()
+            ),
+            Err(_) => wasmtime::bail!(
+                "{} isn't a zstd file; compress the component with `zstd` or remove the .zst extension",
+                path.display()
+            ),
+        };
+        let bytes = zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
+            wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
+        })?;
+        // SAFETY: this private probe loads only the recorded trusted build artifacts.
+        unsafe { Component::deserialize(engine, &bytes) }
+    } else {
+        // SAFETY: this private probe loads only the recorded trusted build artifacts.
+        unsafe { Component::deserialize_file(engine, path) }
+    }
+}
+
 impl NativeRoute {
     fn new(manifest: Manifest) -> anyhow::Result<Self> {
         let worker = (|| -> wasmtime::Result<Worker> {
             let engine = engine()?;
-            // SAFETY: this private probe loads only the recorded trusted build artifacts.
-            let component = unsafe { Component::deserialize_file(engine, &manifest.component) }?;
+            let component = load_component(engine, &manifest.component)?;
             let mut linker = Linker::<Host>::new(engine);
             wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
             wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker)?;

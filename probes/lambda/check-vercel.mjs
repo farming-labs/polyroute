@@ -8,6 +8,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import zlib from "node:zlib";
 import { bounded, deferred } from "./protocol.mjs";
 import { runCases } from "./cases.mjs";
 
@@ -348,6 +349,27 @@ await check("Shutdown cancels an active outbound request", async () => {
   }
 });
 
+await check("A zstd-compressed component serves the same responses", async () => {
+  for (const key of ["counter/route.rs", "go/counter/route.go", "python/response/route.py"]) {
+    const raw = await readFile(fixtures[key].component);
+    const component = path.join(output, `${key.replaceAll("/", "-")}.cwasm.zst`);
+    await writeFile(component, zlib.zstdCompressSync(raw, { pledgedSrcSize: raw.length }));
+    const responses = [];
+    for (const manifest of [{ component: fixtures[key].component }, { component }]) {
+      const h = await start(manifest);
+      try {
+        const first = await h.request();
+        const second = await h.request();
+        responses.push([first, second].map(({ status, text }) => ({ status, text })));
+      } finally {
+        assert.equal(await h.stop(), 0);
+      }
+    }
+    assert.equal(responses[0][0].status, 200, key);
+    assert.deepEqual(responses[1], responses[0], key);
+  }
+});
+
 await check("Invalid manifests fail before readiness", async () => {
   for (const manifest of [
     { component: path.join(output, "missing.cwasm") },
@@ -356,6 +378,13 @@ await check("Invalid manifests fail before readiness", async () => {
   ]) {
     await assert.rejects(start(manifest), /exited before readiness/);
   }
+  const notZstd = path.join(output, "plain.cwasm.zst");
+  await writeFile(notZstd, await readFile(fixtures["counter/route.rs"].component));
+  // Stop a host that wrongly starts, so a regression fails instead of hanging.
+  await assert.rejects(async () => {
+    const h = await start({ component: notZstd });
+    await h.stop();
+  }, /isn't a zstd file/);
 });
 
 report.finished = new Date().toISOString();

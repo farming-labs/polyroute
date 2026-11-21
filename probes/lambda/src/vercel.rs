@@ -189,6 +189,38 @@ mod vercel_tests {
     }
 
     #[test]
+    fn compressed_components_need_a_zstd_frame_with_its_size() {
+        let directory = std::env::temp_dir().join(format!("polyroute-zst-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let engine = engine().unwrap();
+        let message = |file: &std::path::Path| {
+            let Err(error) = load_component(engine, file) else {
+                panic!("{} loaded", file.display());
+            };
+            format!("{error:#}")
+        };
+
+        let unsized_frame = directory.join("unsized.cwasm.zst");
+        let mut encoder = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+        std::io::Write::write_all(&mut encoder, b"not a component").unwrap();
+        let unsized_bytes = encoder.finish().unwrap();
+        assert!(matches!(
+            zstd::zstd_safe::get_frame_content_size(&unsized_bytes),
+            Ok(None)
+        ));
+        std::fs::write(&unsized_frame, unsized_bytes).unwrap();
+        assert!(message(&unsized_frame).contains("doesn't record its decompressed size"));
+
+        let not_zstd = directory.join("plain.cwasm.zst");
+        std::fs::write(&not_zstd, b"plain bytes").unwrap();
+        assert!(message(&not_zstd).contains("isn't a zstd file"));
+
+        let missing = directory.join("missing.cwasm.zst");
+        assert!(message(&missing).contains(&missing.display().to_string()));
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
     fn internal_error_hides_the_cause() {
         let response = internal_error();
         assert_eq!(response.status(), 500);
