@@ -78,9 +78,7 @@ impl NativeRoute {
 /// Reads files start to finish so their pages are cached. Without this, the
 /// pages a guest touches fault in one at a time from the function's file
 /// system, most of them during the first request. On Vercel, one sequential
-/// reader measured about three times faster than eight parallel ones, and
-/// reading the executable as well added more to instances started for a
-/// waiting request than it saved on instances started ahead of one.
+/// reader measured about three times faster than eight parallel ones.
 fn prefetch(paths: &[std::path::PathBuf]) -> anyhow::Result<()> {
     use std::io::Read as _;
     let mut buffer = vec![0; 1 << 20];
@@ -139,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
         "authority override is unsupported; Vercel supplies the request host"
     );
     let prefetching = Instant::now();
-    prefetch(std::slice::from_ref(&manifest.component))?;
+    prefetch(&[std::env::current_exe()?, manifest.component.clone()])?;
     let prefetched = prefetching.elapsed();
     let loading = Instant::now();
     let route = Arc::new(NativeRoute::new(manifest)?);
