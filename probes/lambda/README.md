@@ -37,6 +37,8 @@ No AWS credentials are used. Emulator success is not a deployment claim: provide
 
 The same crate builds `polyroute-vercel` for [ADR 0018](../../docs/decisions/0018-vercel-executable-function.md). It serves one route through Vercel's official `vercel_runtime` bridge instead of the Lambda Runtime API. Both binaries include the same `core.rs`, `route.rs` and `outbound.rs`, so worker reuse, Go's replacement limit, trap retirement, the outbound policy and response validation are shared. Vercel starts the executable with no arguments, so it reads `manifest.json` from its own directory. A trap or invalid response returns a plain `500 Internal Server Error` and writes the cause to stderr.
 
+Before it reports readiness, the host reads its own executable and the component once, start to finish, and creates the instance the first request will use ([ADR 0021](../../docs/decisions/0021-prepare-vercel-routes-before-readiness.md)). Vercel usually starts a function seconds before its first request and freezes it after readiness, so this takes guest startup and file system reads off that request. If the instance can't be created, the host exits before readiness. Set `"serverTiming": true` in `manifest.json` to add a `Server-Timing` header with each phase in milliseconds. The first response reports `prefetch`, `load`, `prepare` and `wait` (from readiness until that request arrived). Every response reports `call`, plus `instantiate` when that request had to create an instance. It is off by default.
+
 After the Docker build above:
 
 ```sh
@@ -53,3 +55,16 @@ node probes/lambda/check-vercel-output.mjs --output /tmp/vercel/output
 `build-vercel-output.mjs` writes a Build Output v3 directory, creating missing parent directories while refusing an existing output directory. Each benchmark route appears twice: as a native `executable` function (`/api/primes`, `/api/slug`, `/api/stats`) and as its TypeScript twin on Node 24 (`/api/primes-ts`, and so on). `check-vercel-output.mjs` starts each native function as Vercel does and requires the same body as its twin. Nothing here deploys; `vercel deploy --prebuilt` from the project directory containing `.vercel/output` needs a linked project and is a separate, explicit step.
 
 Rebuild the addon and prepare fresh fixtures before packaging. [ADR 0019](../../docs/decisions/0019-native-cpu-baseline.md) changes compilation to the target's baseline CPU features after the first provider invocation rejected a component compiled for optional instructions on the CI machine. Existing host-tuned `.cwasm` files are not made portable by repackaging them. Local bridge checks do not establish CPU compatibility on the provider; require successful deployed native responses before timing.
+
+### Measuring first requests
+
+`measure-vercel-cold.mjs` deploys a Build Output again and again and times each function's first request against the same deployment's warm requests. Every request uses a fresh connection and curl's own timers, from TLS completion to the first response byte, and every body is checked. Each round warms the new deployment with a path no function serves and waits 30 seconds, because requests in the first seconds after a deploy pay an extra ~100 ms whatever the runtime. `--revisit` sends one more request to every function of earlier deployments. Run it once they have been idle long enough for Vercel to stop their instances; in these runs, 45 minutes was enough.
+
+```sh
+node probes/lambda/measure-vercel-cold.mjs --deploy <linked directory> --scope <team> \
+  --rounds 10 --output /tmp/vercel-first
+node probes/lambda/measure-vercel-cold.mjs --deploy <linked directory> --scope <team> \
+  --revisit /tmp/vercel-first/deployments.json --output /tmp/vercel-revisit
+```
+
+`--deploy` is the linked project directory holding `.vercel/output` and the `.vercel/output.files.json` that `build-vercel-output.mjs` writes; the harness refuses to deploy files that differ from it. `--functions` takes a JSON list of `{ name, path, body, method?, send? }` to measure other functions. Each round creates a preview deployment in the linked project, so run it only with the project owner's approval, and remove the previews afterward.

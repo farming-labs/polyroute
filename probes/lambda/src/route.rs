@@ -12,6 +12,18 @@ struct Manifest {
     requests_per_instance: u32,
     outbound_allow: Option<Vec<String>>,
     authority: Option<String>,
+    /// Adds a `Server-Timing` header with each phase's duration. For provider
+    /// measurements; off by default.
+    #[serde(default)]
+    server_timing: bool,
+}
+
+/// Startup phases an adapter measured before readiness, in order. The first
+/// response reports them, followed by `wait`: from readiness until that request
+/// arrived.
+struct Startup {
+    phases: Vec<(&'static str, Duration)>,
+    ready_at: Instant,
 }
 
 struct NativeRoute {
@@ -22,6 +34,8 @@ struct NativeRoute {
     outbound: Option<Arc<outbound::ClientState>>,
     authority: Option<String>,
     cancel: CancellationToken,
+    server_timing: bool,
+    startup: Mutex<Option<Startup>>,
 }
 
 impl NativeRoute {
@@ -64,7 +78,29 @@ impl NativeRoute {
             outbound,
             authority: manifest.authority,
             cancel: CancellationToken::new(),
+            server_timing: manifest.server_timing,
+            startup: Mutex::new(None),
         })
+    }
+
+    /// The `Server-Timing` value for one response, in milliseconds: the time
+    /// to create an instance if this request needed one, and the guest call.
+    /// The first response also reports the adapter's startup phases.
+    fn timing(&self, arrived: Instant, result: &HandleResult) -> String {
+        let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        let mut metrics = Vec::new();
+        if let Some(startup) = self.startup.lock().unwrap().take() {
+            for (name, duration) in startup.phases {
+                metrics.push(format!("{name};dur={:.2}", ms(duration)));
+            }
+            let wait = arrived.saturating_duration_since(startup.ready_at);
+            metrics.push(format!("wait;dur={:.2}", ms(wait)));
+        }
+        if let Some(instantiate) = result.instantiate {
+            metrics.push(format!("instantiate;dur={:.2}", ms(instantiate)));
+        }
+        metrics.push(format!("call;dur={:.2}", ms(result.call)));
+        metrics.join(", ")
     }
 
     /// Runs one request through a guest. `headers` alternates names and
@@ -76,6 +112,7 @@ impl NativeRoute {
         headers: Vec<String>,
         body: Vec<u8>,
     ) -> anyhow::Result<http::Response<Vec<u8>>> {
+        let arrived = Instant::now();
         let result = if let Some(state) = &self.outbound {
             let permit = self.permits.clone().acquire_owned().await?;
             let route = self.clone();
@@ -120,6 +157,9 @@ impl NativeRoute {
             result.status
         );
         let mut response = http::Response::builder().status(result.status);
+        if self.server_timing {
+            response = response.header("server-timing", self.timing(arrived, &result));
+        }
         for [name, value] in result.headers.as_chunks::<2>().0 {
             if name == "content-length" {
                 let length: usize = value
