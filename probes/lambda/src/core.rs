@@ -3,6 +3,7 @@ use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Waker};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http_body::Body as _;
@@ -187,6 +188,10 @@ pub struct HandleResult {
     pub message: Option<String>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    /// Time spent creating a guest instance for this request, if it needed one.
+    pub instantiate: Option<Duration>,
+    /// Time spent inside the guest's handler.
+    pub call: Duration,
 }
 
 struct Worker {
@@ -254,6 +259,8 @@ impl Worker {
             message,
             stdout: self.stdout.take(),
             stderr: self.stderr.take(),
+            instantiate: None,
+            call: Duration::ZERO,
         }
     }
 
@@ -265,14 +272,21 @@ impl Worker {
         body: Vec<u8>,
         outbound: Option<OutboundContext>,
     ) -> HandleResult {
+        let mut instantiate = None;
         let mut slot = match self.slot.take() {
             Some(slot) => slot,
-            None => match self.instantiate() {
-                Ok(slot) => slot,
-                Err(error) => {
-                    return self.result("instantiation-failed", Some(format!("{error:#}")));
+            None => {
+                let started = Instant::now();
+                match self.instantiate() {
+                    Ok(slot) => {
+                        instantiate = Some(started.elapsed());
+                        slot
+                    }
+                    Err(error) => {
+                        return self.result("instantiation-failed", Some(format!("{error:#}")));
+                    }
                 }
-            },
+            }
         };
 
         let request = match build_request(&method, &url, &headers, body) {
@@ -286,6 +300,7 @@ impl Worker {
         let cancellation = outbound.as_ref().map(|context| context.cancel.clone());
         slot.store.data_mut().hooks.outbound = outbound;
         let response: Arc<Mutex<Option<GuestResponse>>> = Arc::default();
+        let called = Instant::now();
         let call = (|| -> wasmtime::Result<()> {
             let mut http = slot.store.data_mut().http();
             let scheme = if url.starts_with("https:") {
@@ -302,6 +317,7 @@ impl Worker {
                 .wasi_http_incoming_handler()
                 .call_handle(&mut slot.store, incoming, outparam)
         })();
+        let called = called.elapsed();
 
         slot.store.data_mut().hooks.outbound = None;
         if let Some(cancellation) = cancellation {
@@ -341,6 +357,8 @@ impl Worker {
                 message: None,
                 stdout: self.stdout.take(),
                 stderr: self.stderr.take(),
+                instantiate,
+                call: called,
             },
             Err((outcome, message)) => self.result(outcome, message),
         }

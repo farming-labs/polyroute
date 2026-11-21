@@ -54,6 +54,46 @@ impl NativeRoute {
     }
 }
 
+impl NativeRoute {
+    /// Creates the instance the first request will use. Vercel usually starts
+    /// a function before its first request and freezes it once it reports
+    /// readiness, so work left for later runs during that request instead.
+    fn prepare(&self) -> anyhow::Result<()> {
+        let instantiated = if self.outbound.is_some() {
+            let mut worker = self.template.lock().unwrap().fresh();
+            worker.instantiate().map(|slot| {
+                worker.slot = Some(slot);
+                self.idle.lock().unwrap().push(worker);
+            })
+        } else {
+            let mut worker = self.synchronous.lock().unwrap();
+            worker.instantiate().map(|slot| worker.slot = Some(slot))
+        };
+        instantiated
+            .map_err(|error| anyhow::Error::from_boxed(error.into_boxed_dyn_error()))
+            .context("couldn't instantiate the route before readiness")
+    }
+}
+
+/// Reads files start to finish so their pages are cached. Without this, the
+/// pages a guest touches fault in one at a time from the function's file
+/// system, most of them during the first request. On Vercel, one sequential
+/// reader measured about three times faster than eight parallel ones.
+fn prefetch(paths: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    let mut buffer = vec![0; 1 << 20];
+    for path in paths {
+        let mut file = std::fs::File::open(path)
+            .with_context(|| format!("couldn't open {} to prefetch it", path.display()))?;
+        while file
+            .read(&mut buffer)
+            .with_context(|| format!("couldn't prefetch {}", path.display()))?
+            > 0
+        {}
+    }
+    Ok(())
+}
+
 /// The response for any request the route couldn't serve. The cause goes to
 /// stderr, never into the body.
 fn internal_error() -> http::Response<ResponseBody> {
@@ -96,7 +136,22 @@ async fn main() -> anyhow::Result<()> {
         manifest.authority.is_none(),
         "authority override is unsupported; Vercel supplies the request host"
     );
+    let prefetching = Instant::now();
+    prefetch(&[std::env::current_exe()?, manifest.component.clone()])?;
+    let prefetched = prefetching.elapsed();
+    let loading = Instant::now();
     let route = Arc::new(NativeRoute::new(manifest)?);
+    let loaded = loading.elapsed();
+    let preparing = Instant::now();
+    route.prepare()?;
+    *route.startup.lock().unwrap() = Some(Startup {
+        phases: vec![
+            ("prefetch", prefetched),
+            ("load", loaded),
+            ("prepare", preparing.elapsed()),
+        ],
+        ready_at: Instant::now(),
+    });
     let handler = route.clone();
     let result = vercel_runtime::run(vercel_runtime::service_fn(move |request: Request| {
         let route = handler.clone();
@@ -118,6 +173,20 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod vercel_tests {
     use super::*;
+
+    #[test]
+    fn prefetch_reads_whole_files_and_names_a_missing_one() {
+        let directory =
+            std::env::temp_dir().join(format!("polyroute-prefetch-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("route.cwasm");
+        std::fs::write(&file, vec![7; (1 << 20) + 3]).unwrap();
+        prefetch(std::slice::from_ref(&file)).unwrap();
+        let missing = directory.join("missing.cwasm");
+        let error = prefetch(&[file, missing.clone()]).unwrap_err();
+        assert!(format!("{error:#}").contains(&missing.display().to_string()));
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
 
     #[test]
     fn internal_error_hides_the_cause() {

@@ -215,6 +215,79 @@ await check("Readiness is reported once, before any request", async () => {
   }
 });
 
+// `serverTiming` names each phase; `instantiate` appears only when the request
+// itself had to create an instance.
+const phases = (r) =>
+  (r.headers["server-timing"] ?? "").split(", ").map((metric) => metric.split(";")[0]);
+
+await check("The first request uses an instance created before readiness", async () => {
+  const h = await start({ component: fixtures["counter/route.rs"].component, serverTiming: true });
+  try {
+    const first = await h.request();
+    assert.equal(first.text, "1");
+    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+    const second = await h.request();
+    assert.equal(second.text, "2");
+    assert.deepEqual(phases(second), ["call"]);
+  } finally {
+    assert.equal(await h.stop(), 0);
+  }
+});
+
+await check("An outbound route's first request uses the prepared instance", async () => {
+  // Like the shared outbound cases, answer without `content-length`; the
+  // fixture copies that header and wstd rejects the copy.
+  const upstream = http.createServer((req, res) => {
+    res.writeHead(201, { "content-type": "text/plain" });
+    res.end("upstream");
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  const h = await start({
+    component: fixtures["outbound/route.rs"].component,
+    outboundAllow: ["127.0.0.1"],
+    serverTiming: true,
+  });
+  try {
+    const first = await h.request("/", {
+      headers: { "x-upstream": `http://127.0.0.1:${upstream.address().port}/` },
+    });
+    assert.equal(first.status, 200, h.logs);
+    assert.equal(first.text, "upstream");
+    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+  } finally {
+    assert.equal(await h.stop(), 0);
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+await check("Per-request instances are still created for every later request", async () => {
+  const h = await start({
+    component: fixtures["counter/route.rs"].component,
+    perRequest: true,
+    serverTiming: true,
+  });
+  try {
+    const first = await h.request();
+    assert.equal(first.text, "1");
+    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+    const second = await h.request();
+    assert.equal(second.text, "1");
+    assert.deepEqual(phases(second), ["instantiate", "call"]);
+  } finally {
+    assert.equal(await h.stop(), 0);
+  }
+});
+
+await check("Server-Timing is off unless the manifest asks for it", async () => {
+  const h = await start({ component: fixtures["counter/route.rs"].component });
+  try {
+    assert.equal((await h.request()).headers["server-timing"], undefined);
+  } finally {
+    assert.equal(await h.stop(), 0);
+  }
+});
+
 await check("Bridge headers never reach the guest", async () => {
   const h = await start({ component: fixtures["python/response/route.py"].component });
   try {

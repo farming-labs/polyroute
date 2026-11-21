@@ -1,5 +1,6 @@
 // Writes a Vercel Build Output (v3) directory with each benchmark route twice:
-// as a native `executable` function and as its TypeScript twin on Node.
+// as a native `executable` function and as its TypeScript twin on Node. A
+// `/api/warmup` function serves the measurement harness.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -35,6 +36,13 @@ const require = createRequire(path.join(repo, "packages/polyroute/package.json")
 const { transformWithOxc } = await import(pathToFileURL(require.resolve("vite")).href);
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const files = [];
+const nodeConfig = {
+  runtime: "nodejs24.x",
+  handler: "index.mjs",
+  launcherType: "Nodejs",
+  shouldAddHelpers: false,
+  supportsResponseStreaming: true,
+};
 
 async function write(file, bytes, mode = 0o644) {
   await mkdir(path.dirname(file), { recursive: true });
@@ -80,18 +88,17 @@ for (const route of routes) {
   const { code } = await transformWithOxc(await readFile(source, "utf8"), source, { lang: "ts" });
   const twin = path.join(output, "functions/api", `${route.name}-ts.func`);
   await write(path.join(twin, "index.mjs"), Buffer.from(code));
-  const nodeConfig = {
-    runtime: "nodejs24.x",
-    handler: "index.mjs",
-    launcherType: "Nodejs",
-    shouldAddHelpers: false,
-    supportsResponseStreaming: true,
-  };
   await write(path.join(twin, ".vc-config.json"), JSON.stringify(nodeConfig, null, 2) + "\n");
 }
+// Only `measure-vercel-cold.mjs` calls this function. Its requests warm a new
+// deployment's request path without touching a measured function.
+const warmup = path.join(output, "functions/api/warmup.func");
+const warmupCode = 'export function GET() {\n  return new Response("warm\\n");\n}\n';
+await write(path.join(warmup, "index.mjs"), Buffer.from(warmupCode));
+await write(path.join(warmup, ".vc-config.json"), JSON.stringify(nodeConfig, null, 2) + "\n");
 await writeFile(
   path.join(output, "..", `${path.basename(output)}.files.json`),
   JSON.stringify({ host: digest(host), files }, null, 2) + "\n",
   { flag: "wx" },
 );
-console.log(`Wrote ${routes.length * 2} functions to ${output}.`);
+console.log(`Wrote ${routes.length * 2 + 1} functions to ${output}.`);
