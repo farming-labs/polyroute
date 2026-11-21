@@ -7,6 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { zstdDecompressSync } from "node:zlib";
 
 const exec = promisify(execFile);
 const builder = fileURLToPath(new URL("../probes/lambda/build-vercel-output.mjs", import.meta.url));
@@ -65,7 +66,10 @@ test("Vercel packaging creates missing output parents and preserves artifact byt
   for (const name of ["primes", "slug", "stats"]) {
     const native = path.join(output, "functions/api", `${name}.func`);
     assert.deepEqual(await readFile(path.join(native, "executable")), host);
-    assert.deepEqual(await readFile(path.join(native, "route.cwasm")), component);
+    const compressed = await readFile(path.join(native, "route.cwasm.zst"));
+    assert.deepEqual(zstdDecompressSync(compressed), component);
+    const manifest = JSON.parse(await readFile(path.join(native, "manifest.json")));
+    assert.equal(manifest.component, "route.cwasm.zst");
   }
   // `measure-vercel-cold.mjs` requires exactly this body from the warmup function.
   const warmup = path.join(output, "functions/api/warmup.func/index.mjs");

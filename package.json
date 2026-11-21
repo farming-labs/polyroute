@@ -18,7 +18,7 @@
     "oxlint": "^1.93.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.15"
   },
   "packageManager": "pnpm@10.9.0"
 }

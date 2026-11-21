@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import zlib from "node:zlib";
 
 const probe = fileURLToPath(new URL(".", import.meta.url));
 const repo = path.resolve(probe, "../..");
@@ -25,6 +26,13 @@ if (host.subarray(0, 6).compare(Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1])) !==
 if (host.readUInt16LE(18) !== 62)
   throw new Error("The host isn't x86_64; build it for x86_64-unknown-linux-gnu.");
 const fixtures = JSON.parse(await readFile(values.fixtures));
+if (typeof zlib.zstdCompressSync !== "function")
+  throw new Error("Use Node 22.15 or later; the Build Output compresses components with zstd.");
+// Vercel's function file system read a raw 32 MB Python component at about
+// 115 MB/s and the same component compressed at about 270 MB/s. On instances
+// started for a waiting request, level 19 started faster than levels 1 and 3
+// (ADR 0022).
+const zstdLevel = 19;
 const routes = [
   { name: "primes", native: "primes/route.rs" },
   { name: "slug", native: "slug/route.go" },
@@ -65,9 +73,14 @@ for (const route of routes) {
   assert.equal(digest(component), artifact.sha256, `${route.native} changed; prepare it again.`);
   const native = path.join(output, "functions/api", `${route.name}.func`);
   await write(path.join(native, "executable"), host, 0o755);
-  await write(path.join(native, "route.cwasm"), component);
+  const compressed = zlib.zstdCompressSync(component, {
+    params: { [zlib.constants.ZSTD_c_compressionLevel]: zstdLevel },
+    // The host needs the decompressed size in the frame header.
+    pledgedSrcSize: component.length,
+  });
+  await write(path.join(native, "route.cwasm.zst"), compressed);
   const manifest = {
-    component: "route.cwasm",
+    component: "route.cwasm.zst",
     requestsPerInstance: route.native.endsWith(".go") ? 1000 : 0,
   };
   await write(path.join(native, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
