@@ -1,8 +1,8 @@
 // Measures first requests on Vercel against a Build Output from
 // `build-vercel-output.mjs`. Each round deploys a fresh preview, warms the
-// deployment with a request no function serves and lets it settle, then sends
-// one first request to every function in an order rotated each round, and
-// finally warm requests that give each deployment's baseline. `--revisit` instead sends one more
+// deployment's request path through `/api/warmup`, then sends one first request
+// to every function in an order rotated each round, and finally warm requests
+// that give each deployment's baseline. `--revisit` instead sends one more
 // request to every function of earlier deployments, after they have been idle
 // long enough for Vercel to stop their instances.
 //
@@ -24,7 +24,7 @@ const { values } = parseArgs({
     functions: { type: "string" },
     rounds: { type: "string", default: "8" },
     warm: { type: "string", default: "3" },
-    "settle-ms": { type: "string", default: "30000" },
+    warmup: { type: "string", default: "10" },
     revisit: { type: "string" },
     output: { type: "string" },
   },
@@ -67,7 +67,7 @@ function run(command, args) {
 }
 
 let sequence = 0;
-async function request(deployment, fn, status = 200) {
+async function request(deployment, fn) {
   const index = ++sequence;
   const body = path.join(output, `body-${index}`);
   const headers = path.join(output, `headers-${index}`);
@@ -96,7 +96,7 @@ async function request(deployment, fn, status = 200) {
   const timing = JSON.parse(result.stdout);
   const text = await readFile(body, "utf8").catch(() => "");
   const head = await readFile(headers, "utf8");
-  assert.equal(timing.http_code, status, `${fn.path} returned ${timing.http_code}: ${text}`);
+  assert.equal(timing.http_code, 200, `${fn.path} returned ${timing.http_code}: ${text}`);
   if (fn.body !== undefined) assert.equal(text, fn.body, `${fn.path} returned an unexpected body`);
   return {
     // From TLS completion to the first response byte: one round trip plus
@@ -113,9 +113,26 @@ async function record(sample) {
   await appendFile(samplesFile, JSON.stringify(sample) + "\n");
 }
 
+// Most of a new deployment's first function requests take an extra ~100 ms,
+// whatever the runtime. The extra cost fades over the deployment's first
+// several function requests, not with time: after a 30-second wait, 20 of 20
+// requests in the first two positions still paid it. A path no function
+// serves doesn't help, because the edge answers it without reaching the
+// function's region. `/api/warmup` is a function only this harness calls;
+// after ten requests to it, 1 of 30 first requests paid the extra cost.
+const warmups = Number(values.warmup);
+assert.ok(Number.isInteger(warmups) && warmups >= 0, "--warmup must be a whole number.");
+async function warmPath(round, id) {
+  for (let index = 0; index < warmups; index++) {
+    const r = await request(id, { path: "/api/warmup", body: "warm\n" });
+    await record({ round, deployment: id, phase: "path-warmup", index, name: "warmup", ...r });
+  }
+}
+
 if (values.revisit) {
   const deployments = JSON.parse(await readFile(values.revisit, "utf8"));
   for (const [round, { id }] of deployments.entries()) {
+    await warmPath(round, id);
     const shift = round % functions.length;
     const order = [...functions.slice(shift), ...functions.slice(0, shift)];
     for (const [position, fn] of order.entries()) {
@@ -167,16 +184,7 @@ for (let round = 0; round < rounds; round++) {
     JSON.stringify(deployments, null, 2) + "\n",
   );
   console.log(`round ${round + 1}/${rounds}: ${id}`);
-  // A new deployment's first request pays for routing setup, whichever path
-  // it asks for. A path no function serves takes that cost off the functions.
-  const first = await request(id, { path: "/__polyroute-warmup" }, 404);
-  await record({ round, deployment: id, phase: "deployment-first", name: "warmup", ...first });
-  // For about 15 seconds after a deploy, most first requests take an extra
-  // ~100 ms whatever the runtime: in earlier runs, 38 of 46 requests in the
-  // first four positions did, against 2 of 76 from the ninth on. Waiting keeps
-  // that out of the comparison. Vercel had already started the instances, so
-  // the wait doesn't change what the first request meets.
-  await new Promise((resolve) => setTimeout(resolve, Number(values["settle-ms"])));
+  await warmPath(round, id);
   const shift = round % functions.length;
   const order = [...functions.slice(shift), ...functions.slice(0, shift)];
   for (const [position, fn] of order.entries()) {

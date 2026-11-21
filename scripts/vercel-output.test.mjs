@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -60,12 +60,19 @@ test("Vercel packaging creates missing output parents and preserves artifact byt
     "slug.func",
     "stats-ts.func",
     "stats.func",
+    "warmup.func",
   ]);
   for (const name of ["primes", "slug", "stats"]) {
     const native = path.join(output, "functions/api", `${name}.func`);
     assert.deepEqual(await readFile(path.join(native, "executable")), host);
     assert.deepEqual(await readFile(path.join(native, "route.cwasm")), component);
   }
+  // `measure-vercel-cold.mjs` requires exactly this body from the warmup function.
+  const warmup = path.join(output, "functions/api/warmup.func/index.mjs");
+  const { GET } = await import(pathToFileURL(warmup).href);
+  const response = GET();
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "warm\n");
 });
 
 test("Vercel packaging refuses an existing output without changing its contents", async (t) => {
