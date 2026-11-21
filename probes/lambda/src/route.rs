@@ -57,9 +57,10 @@ fn load_component(engine: &Engine, path: &std::path::Path) -> wasmtime::Result<C
                 path.display()
             ),
         };
-        let bytes = zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
-            wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
-        })?;
+        let bytes =
+            zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
+                wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
+            })?;
         // SAFETY: this private probe loads only the recorded trusted build artifacts.
         unsafe { Component::deserialize(engine, &bytes) }
     } else {
