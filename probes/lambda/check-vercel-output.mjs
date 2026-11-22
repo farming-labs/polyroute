@@ -64,6 +64,35 @@ function send(port, { target, method = "GET", send = "" }) {
   });
 }
 
+// Vercel sends concurrent requests to one instance until it stops answering
+// `/_vercel/ping` promptly. While a guest call runs, pings must wait for it,
+// as they do on a Node instance running a request.
+async function checkBusyPing(port) {
+  const started = performance.now();
+  let done = false;
+  const heavy = send(port, { target: "/api/primes?limit=2000000" }).finally(() => (done = true));
+  let longest = 0;
+  let pings = 0;
+  while (!done) {
+    const sent = performance.now();
+    const ping = await send(port, { target: "/_vercel/ping" });
+    assert.equal(ping.status, 200, "ping status");
+    longest = Math.max(longest, performance.now() - sent);
+    pings++;
+  }
+  const result = await heavy;
+  const elapsed = performance.now() - started;
+  assert.equal(result.body.toString(), '{"limit":2000000,"primes":148933}', "long call body");
+  assert.ok(elapsed >= 100, `the long call took ${elapsed.toFixed(0)} ms; raise its limit`);
+  assert.ok(
+    longest >= elapsed / 2,
+    `${pings} pings answered during a ${elapsed.toFixed(0)} ms guest call, the slowest in ${longest.toFixed(1)} ms; pings must wait while a guest call runs`,
+  );
+  console.log(
+    `PASS primes: a ping waited ${longest.toFixed(0)} ms of a ${elapsed.toFixed(0)} ms guest call`,
+  );
+}
+
 for (const request of requests) {
   const { name, target, method = "GET" } = request;
   try {
@@ -112,6 +141,7 @@ for (const request of requests) {
       assert.equal(native.body.toString(), expected.toString(), `${name} body`);
       assert.equal(native.body.toString(), request.body, `${name} benchmark body`);
       console.log(`PASS ${name}: ${native.body.toString().trim()}`);
+      if (name === "primes") await checkBusyPing(port);
     } finally {
       child.kill("SIGTERM");
       const [code] = await bounded(exited, `${name} exit`);

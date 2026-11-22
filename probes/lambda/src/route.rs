@@ -26,8 +26,57 @@ struct Startup {
     ready_at: Instant,
 }
 
+/// One long-lived thread for synchronous guest calls. They arrive one at a
+/// time, reuse the thread's Wasmtime state and stack, and run outside the
+/// runtime that serves requests. The thread exits when its route is dropped.
+struct GuestThread {
+    jobs: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>,
+}
+
+impl GuestThread {
+    fn new() -> std::io::Result<Self> {
+        // Wasmtime's synchronous imports drive their futures on the current
+        // Tokio handle, as they did inside `block_in_place`. This runtime's
+        // worker drives their timers and I/O while the serving runtime waits.
+        // Without a handle, wasmtime-wasi falls back to a global runtime with
+        // a worker per CPU and yields before every call.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("polyroute-guest-io")
+            .enable_all()
+            .build()?;
+        let (jobs, receiver) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        std::thread::Builder::new()
+            .name("polyroute-guest".into())
+            .spawn(move || {
+                let _context = runtime.enter();
+                for job in receiver {
+                    job();
+                }
+            })?;
+        Ok(Self { jobs })
+    }
+
+    /// Runs `job` on the guest thread and blocks the calling thread until it
+    /// returns. A panic in `job` resumes on the calling thread.
+    fn run<R: Send + 'static>(&self, job: impl FnOnce() -> R + Send + 'static) -> R {
+        let (done, result) = std::sync::mpsc::sync_channel(1);
+        self.jobs
+            .send(Box::new(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                let _ = done.send(outcome);
+            }))
+            .expect("the guest thread runs as long as its route");
+        match result.recv().expect("the guest thread returns every job") {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+}
+
 struct NativeRoute {
     synchronous: Mutex<Worker>,
+    guest: GuestThread,
     template: Mutex<Worker>,
     idle: Mutex<Vec<Worker>>,
     permits: Arc<Semaphore>,
@@ -102,6 +151,7 @@ impl NativeRoute {
         }
         Ok(Self {
             synchronous: Mutex::new(worker.fresh()),
+            guest: GuestThread::new().context("couldn't start the guest thread")?,
             template: Mutex::new(worker),
             idle: Mutex::new(Vec::new()),
             permits: Arc::new(Semaphore::new(32)),
@@ -165,11 +215,21 @@ impl NativeRoute {
             })
             .await?
         } else {
-            tokio::task::block_in_place(|| {
-                self.synchronous
+            // Synchronous guest calls run one at a time on the guest thread,
+            // and this one holds the runtime's only worker until it returns.
+            // Vercel sends concurrent requests to an instance until it stops
+            // answering `/_vercel/ping` promptly, as a Node instance does while
+            // it runs a request. `block_in_place` handed the runtime to another
+            // thread that kept answering, so Vercel queued requests behind the
+            // guest instead of starting another instance.
+            let route = self.clone();
+            let guest_method = method.clone();
+            self.guest.run(move || {
+                route
+                    .synchronous
                     .lock()
                     .unwrap()
-                    .handle(method.clone(), url, headers, body, None)
+                    .handle(guest_method, url, headers, body, None)
             })
         };
         use std::io::Write as _;

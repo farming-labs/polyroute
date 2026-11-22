@@ -58,7 +58,7 @@ impl NativeRoute {
     /// Creates the instance the first request will use. Vercel usually starts
     /// a function before its first request and freezes it once it reports
     /// readiness, so work left for later runs during that request instead.
-    fn prepare(&self) -> anyhow::Result<()> {
+    fn prepare(self: &Arc<Self>) -> anyhow::Result<()> {
         let instantiated = if self.outbound.is_some() {
             let mut worker = self.template.lock().unwrap().fresh();
             worker.instantiate().map(|slot| {
@@ -66,8 +66,13 @@ impl NativeRoute {
                 self.idle.lock().unwrap().push(worker);
             })
         } else {
-            let mut worker = self.synchronous.lock().unwrap();
-            worker.instantiate().map(|slot| worker.slot = Some(slot))
+            // On the thread that will serve requests, so its own setup is done
+            // before readiness too.
+            let route = self.clone();
+            self.guest.run(move || {
+                let mut worker = route.synchronous.lock().unwrap();
+                worker.instantiate().map(|slot| worker.slot = Some(slot))
+            })
         };
         instantiated
             .map_err(|error| anyhow::Error::from_boxed(error.into_boxed_dyn_error()))

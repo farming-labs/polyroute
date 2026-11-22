@@ -1,6 +1,6 @@
 # Vercel languages: first requests, on-demand starts and requests per second
 
-**On Vercel, native Rust, Go and Python routes beat their TypeScript twins on first requests to pre-started instances and tie them on light routes under load. Rust also wins on demand. Go ties there and Python loses by about 95 ms. Under concurrent CPU-heavy load, the executable host on `main` queues requests and serves a fifth to a quarter of TypeScript's rate.** The same components run in Node through polyroute's wasmtime runtime lose every first-request comparison in medians, by 50 to 290 ms, and serve the heavy load 1.4× faster than TypeScript.
+**On Vercel, native Rust, Go and Python routes beat their TypeScript twins on first requests to pre-started instances and tie them on light routes under load. Rust also wins on demand. Go ties there and Python loses by about 95 ms. Under concurrent CPU-heavy load, the executable host on `main` queued requests and served under a third of TypeScript's rate; with [ADR 0023](../decisions/0023-hold-vercel-pings-during-guest-calls.md)'s fix it serves 1.3 to 1.5 times TypeScript's rate.** The same components run in Node through polyroute's wasmtime runtime lose every first-request comparison in medians, by 50 to 290 ms, and serve the heavy load 1.4× faster than TypeScript.
 
 ## Setup
 
@@ -61,7 +61,34 @@ Primes below 1,000,000, medians over set C:
 |          10 |  8.0 (p50 1,301 ms) |  42.9 (232 ms) |  29.1 (366 ms) |
 |          50 | 32.4 (p50 1,108 ms) | 219.9 (229 ms) | 158.7 (360 ms) |
 
-The Rust code itself runs 1.6× faster than TypeScript: one connection at a time, both Rust variants beat TypeScript on 7 of 8 previews. With concurrent requests, the executable host fell to 0.28× and 0.20× of TypeScript, losing all 16 pairs, while the Node variant kept a single request's latency and served 1.47× and 1.39×. Its p50 rose to 1.1–1.3 s, five times a single call, so requests waited on instances already running one; at 50 connections it started 85 instances over eight runs, about 11 per run. Vercel sends concurrent requests to an executable instance while it answers `/_vercel/ping` promptly, and the host keeps answering during a guest call while it runs guest calls one at a time.
+The Rust code itself runs 1.6× faster than TypeScript: one connection at a time, both Rust variants beat TypeScript on 7 of 8 previews. With concurrent requests, the executable host fell to 0.28× and 0.20× of TypeScript, losing all 16 pairs, while the Node variant kept a single request's latency and served 1.47× and 1.39×. Its p50 rose to 1.1–1.3 s, five times a single call, so requests waited on instances already running one; at 50 connections it started 85 instances over eight runs, about 11 per run. Vercel sends concurrent requests to an executable instance while it answers `/_vercel/ping` promptly, and the host kept answering during a guest call while it ran guest calls one at a time. The next section measures the fix.
+
+## With pings held during guest calls
+
+Set E measures [ADR 0023](../decisions/0023-hold-vercel-pings-during-guest-calls.md)'s host: CI's build at `5015f93` (run `44968011804`, artifact `14732039501`, SHA-256 `932153fbc2c59b47f4352cf239513b0d89d64f852952af314a0698cb11e21ce6`; host `840ad74d…`) as the `*-busy` functions, beside `main`'s host, the `*-node` functions and the TypeScript twins, all in the same eight previews. They were created 16:55–17:10 over three runs of `measure-vercel-cold.mjs`: the first two stopped while warming their last preview, when the Vercel CLI exited 1 and curl exited 56, before any function request, and those two previews aren't counted. Loads ran from inside `iad1` from 17:11 to 18:42, with the same settings as above.
+
+**First requests on pre-started instances didn't change.** Paired against TypeScript, the fixed host won by 19, 14 and 9 ms (7/8, 6/8 and 6/8; Rust, Go, Python) and `main`'s host by 18, 11 and 13 ms. Its guest time on the first request was 0.66, 1.09 and 4.48 ms, against 0.70, 1.19 and 4.34 for `main`'s host.
+
+**CPU-heavy requests spread across instances.** Primes below 1,000,000, medians with p50 latency:
+
+| Connections |     `main` host |     Fixed host |      Rust node |        Rust TS |
+| ----------: | --------------: | -------------: | -------------: | -------------: |
+|           1 |    4.4 (230 ms) |   4.2 (231 ms) |   4.4 (233 ms) |   2.6 (370 ms) |
+|          10 |  8.3 (1,136 ms) |  44.4 (229 ms) |  43.5 (232 ms) |  33.1 (361 ms) |
+|          50 | 28.7 (1,296 ms) | 223.0 (227 ms) | 222.6 (228 ms) | 159.2 (361 ms) |
+
+Paired against TypeScript, the fixed host served 1.62×, 1.33× and 1.41× (6/8, 8/8 and 8/8) and `main`'s host 1.62×, 0.24× and 0.18×. At 50 connections the fixed host started 321 instances over the eight runs, against 111 for `main`'s.
+
+**Calls of about 2 s ran without errors.** Primes below 5,000,000 take 1.94 s of guest time. With 3 s of warmup and 20 s measured:
+
+| Connections |    `main` host |     Fixed host |      Rust node |        Rust TS |
+| ----------: | -------------: | -------------: | -------------: | -------------: |
+|           1 | 0.5 (1,971 ms) | 0.5 (1,974 ms) | 0.5 (1,975 ms) | 0.3 (3,282 ms) |
+|          10 | 1.5 (5,236 ms) | 5.1 (1,968 ms) | 5.2 (1,968 ms) | 3.4 (3,267 ms) |
+
+The fixed host served 1.67× and 1.50× TypeScript's rate (8/8 each), and no request in any set E run returned an error.
+
+**Light routes didn't change.** Paired against TypeScript, the fixed host measured 1.04× to 1.09× and `main`'s host 1.01× to 1.06×, with an A/A drift of up to 3.8%. Both hosts' warm guest calls took 0.46–0.59 ms.
 
 ## From the client
 
@@ -74,6 +101,8 @@ Sample files are kept outside the repository. Their SHA-256 digests:
 - Set A first requests: `719a1ec46007dee72a0bd3a455e7e4d059c1eb3f92ab262a022d9072c40f4827`; revisit: `60ed21106bf55416d622a5f0dc8fe68e4e24158a31fd8bd54b597e0cb5089fc6`; client load: `115c98aa20765cbd78be51d0c30d868d9a95ca12d66912a0ea47833a4e807178`.
 - Set B first requests: `69443424505ab129aef080476627aae4dcc1b53ffd789b76f5b191ec2bd91ee7`; revisit: `9c0bb81ca3cec0fc2049dc22c5434889073c70eba3d293f4ac1d4d5905334c32`; client load: `ba7a68b2223bf99a4eaa64020eec7d60d924ac8418318bea47b207fc2dd508f2`.
 - Set C first requests: `850915212249952e445aa441f5ddda8809b576dbcb8de18645e347aecfb704ac`; light load: `a65068dca5337f60c4036d1bf18d6dab13b341e6058f98ed99bdecb9223e3c91`; heavy load: `a74c400fc75fbd7f056a42cc764b8f6d2a48d87c17212bde5b82b870c01b0672`.
+
+- Set E first requests: `743a9873f098c5cebe94fa7e12ff50beeace1efa58940f1478de651d6b6e46a4`; heavy load: `f729f753fd6dff6c786c61303c6980daf4734ea1db4fd9382f369edb1a5d2ebf`; 2-second calls: `02cf78493329f84e5127103b088c89e78b0cf4dc601befd7f5028725b6231573`; light load: `b003e791c99ae88311e50844c167e9e2ed1775ab33135c534df054f40afdf186`.
 
 No first request was retried, and no in-region run was aborted.
 
