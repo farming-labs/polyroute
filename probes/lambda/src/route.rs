@@ -27,19 +27,29 @@ struct Startup {
 }
 
 /// One long-lived thread for synchronous guest calls. They arrive one at a
-/// time, reuse the thread's Wasmtime state and stack, and run outside the Tokio
-/// runtime, where Wasmtime's synchronous imports use wasmtime-wasi's runtime.
-/// The thread exits when its route is dropped.
+/// time, reuse the thread's Wasmtime state and stack, and run outside the
+/// runtime that serves requests. The thread exits when its route is dropped.
 struct GuestThread {
     jobs: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>,
 }
 
 impl GuestThread {
     fn new() -> std::io::Result<Self> {
+        // Wasmtime's synchronous imports drive their futures on the current
+        // Tokio handle, as they did inside `block_in_place`. This runtime's
+        // worker drives their timers and I/O while the serving runtime waits.
+        // Without a handle, wasmtime-wasi falls back to a global runtime with
+        // a worker per CPU and yields before every call.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("polyroute-guest-io")
+            .enable_all()
+            .build()?;
         let (jobs, receiver) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send>>();
         std::thread::Builder::new()
             .name("polyroute-guest".into())
             .spawn(move || {
+                let _context = runtime.enter();
                 for job in receiver {
                     job();
                 }
