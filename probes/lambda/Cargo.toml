@@ -48,7 +48,15 @@ debug = false
 strip = true
 incremental = false
 # The host reads its own executable before readiness, and on-demand starts on
-# Vercel spend most of that phase reading it. Whole-program optimization
-# made the Linux executable 27% smaller.
+# Vercel spend most of that phase reading it. Whole-program optimization and
+# optimizing for size made the Linux executable about 45% smaller. Guest code is
+# precompiled, so the host's own speed matters only where the host does the
+# work.
 lto = "fat"
 codegen-units = 1
+opt-level = "s"
+
+# Decompressing a component is the host's longest step before readiness, and
+# it measured slower when zstd was optimized for size.
+[profile.release.package.zstd-sys]
+opt-level = 3
