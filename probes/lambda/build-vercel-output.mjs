@@ -33,6 +33,10 @@ if (typeof zlib.zstdCompressSync !== "function")
 // started for a waiting request, level 19 started faster than levels 1 and 3
 // (ADR 0022).
 const zstdLevel = 19;
+// Each 4 MiB of a component becomes its own zstd frame, so the host can
+// decompress frames on every CPU an instance has. Python's component grew 4.5%
+// against a single frame.
+const zstdFrameBytes = 4 << 20;
 const routes = [
   { name: "primes", native: "primes/route.rs" },
   { name: "slug", native: "slug/route.go" },
@@ -73,11 +77,18 @@ for (const route of routes) {
   assert.equal(digest(component), artifact.sha256, `${route.native} changed; prepare it again.`);
   const native = path.join(output, "functions/api", `${route.name}.func`);
   await write(path.join(native, "executable"), host, 0o755);
-  const compressed = zlib.zstdCompressSync(component, {
-    params: { [zlib.constants.ZSTD_c_compressionLevel]: zstdLevel },
-    // The host needs the decompressed size in the frame header.
-    pledgedSrcSize: component.length,
-  });
+  const frames = [];
+  for (let start = 0; start < component.length; start += zstdFrameBytes) {
+    const frame = component.subarray(start, start + zstdFrameBytes);
+    frames.push(
+      zlib.zstdCompressSync(frame, {
+        params: { [zlib.constants.ZSTD_c_compressionLevel]: zstdLevel },
+        // The host needs each frame's decompressed size in its header.
+        pledgedSrcSize: frame.length,
+      }),
+    );
+  }
+  const compressed = Buffer.concat(frames);
   await write(path.join(native, "route.cwasm.zst"), compressed);
   const manifest = {
     component: "route.cwasm.zst",

@@ -226,6 +226,26 @@ mod vercel_tests {
     }
 
     #[test]
+    fn compressed_components_can_hold_several_frames() {
+        let data: Vec<u8> = (0..3_000_000_u32).map(|n| (n % 251) as u8).collect();
+        let mut compressed = Vec::new();
+        for chunk in data.chunks(1 << 20) {
+            compressed.extend(zstd::bulk::compress(chunk, 3).unwrap());
+        }
+        let path = std::path::Path::new("route.cwasm.zst");
+        let frames = zstd_frames(path, &compressed).unwrap();
+        assert_eq!(frames.len(), 3);
+        let mut output = vec![0; frames.iter().map(|frame| frame.size).sum()];
+        decompress_frames(path, &compressed, &frames, &mut output).unwrap();
+        assert!(output == data);
+
+        let Err(error) = zstd_frames(path, &compressed[..compressed.len() - 1]) else {
+            panic!("a truncated frame was accepted");
+        };
+        assert!(format!("{error:#}").contains("ends partway through a zstd frame"));
+    }
+
+    #[test]
     fn internal_error_hides_the_cause() {
         let response = internal_error();
         assert_eq!(response.status(), 500);

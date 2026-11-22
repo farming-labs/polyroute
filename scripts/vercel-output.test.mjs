@@ -19,7 +19,8 @@ async function fixture(t) {
   const host = Buffer.alloc(64);
   host.set([0x7f, 0x45, 0x4c, 0x46, 2, 1]);
   host.writeUInt16LE(62, 18);
-  const component = Buffer.from("fixture component");
+  // Just over 4 MiB, so the build writes it as two zstd frames.
+  const component = Buffer.alloc((4 << 20) + 17, "fixture component ");
   await writeFile(path.join(root, "host"), host);
   await writeFile(path.join(root, "route.cwasm"), component);
   const artifacts = Object.fromEntries(
@@ -72,6 +73,9 @@ test("Vercel packaging creates missing output parents and preserves artifact byt
     assert.deepEqual(await readFile(path.join(native, "executable")), host);
     const compressed = await readFile(path.join(native, "route.cwasm.zst"));
     assert.deepEqual(zstdDecompressSync(compressed), component);
+    const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+    assert.equal(compressed.indexOf(magic), 0);
+    assert.ok(compressed.indexOf(magic, 4) > 0, "the component should span two zstd frames");
     const manifest = JSON.parse(await readFile(path.join(native, "manifest.json")));
     assert.equal(manifest.component, "route.cwasm.zst");
   }
