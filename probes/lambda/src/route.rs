@@ -106,16 +106,60 @@ fn load_component(engine: &Engine, path: &std::path::Path) -> wasmtime::Result<C
                 path.display()
             ),
         };
-        let bytes =
-            zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
-                wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
-            })?;
-        // SAFETY: this private probe loads only the recorded trusted build artifacts.
-        unsafe { Component::deserialize(engine, &bytes) }
+        #[cfg(target_os = "linux")]
+        return load_from_memory_file(engine, path, &compressed, size);
+        #[cfg(not(target_os = "linux"))]
+        {
+            let bytes =
+                zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
+                    wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
+                })?;
+            // SAFETY: this private probe loads only the recorded trusted build artifacts.
+            unsafe { Component::deserialize(engine, &bytes) }
+        }
     } else {
         // SAFETY: this private probe loads only the recorded trusted build artifacts.
         unsafe { Component::deserialize_file(engine, path) }
     }
+}
+
+/// Decompresses a component into an anonymous in-memory file and maps that
+/// file. Wasmtime uses a mapped file's pages directly for the component's code
+/// and its initial memory images. Deserializing from a byte slice instead
+/// copies the component into new memory and copies each memory image again.
+#[cfg(target_os = "linux")]
+fn load_from_memory_file(
+    engine: &Engine,
+    path: &std::path::Path,
+    compressed: &[u8],
+    size: u64,
+) -> wasmtime::Result<Component> {
+    use std::os::fd::{AsRawFd as _, FromRawFd as _};
+    // SAFETY: the name is a valid C string, and `file` takes ownership of the
+    // returned descriptor.
+    let descriptor =
+        unsafe { libc::memfd_create(c"polyroute-component".as_ptr(), libc::MFD_CLOEXEC) };
+    if descriptor < 0 {
+        wasmtime::bail!(
+            "couldn't create memory for {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        );
+    }
+    // SAFETY: `memfd_create` returned a new descriptor that nothing else owns.
+    let mut file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+    zstd::stream::copy_decode(compressed, &mut file).map_err(|error| {
+        wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
+    })?;
+    let written = file.metadata()?.len();
+    wasmtime::ensure!(
+        written == size,
+        "{} decompressed to {written} bytes but records {size}; compress the component again",
+        path.display()
+    );
+    // SAFETY: this private probe loads only the recorded trusted build
+    // artifacts, and nothing writes to the in-memory file after this point.
+    unsafe { Component::deserialize_file(engine, format!("/proc/self/fd/{}", file.as_raw_fd())) }
 }
 
 impl NativeRoute {
