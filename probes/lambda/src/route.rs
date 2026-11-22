@@ -95,25 +95,14 @@ fn load_component(engine: &Engine, path: &std::path::Path) -> wasmtime::Result<C
     if path.extension().is_some_and(|extension| extension == "zst") {
         let compressed = std::fs::read(path)
             .map_err(|error| wasmtime::format_err!("couldn't read {}: {error}", path.display()))?;
-        let size = match zstd::zstd_safe::get_frame_content_size(&compressed) {
-            Ok(Some(size)) => size,
-            Ok(None) => wasmtime::bail!(
-                "{} doesn't record its decompressed size; compress it with the size included, as the `zstd` command does",
-                path.display()
-            ),
-            Err(_) => wasmtime::bail!(
-                "{} isn't a zstd file; compress the component with `zstd` or remove the .zst extension",
-                path.display()
-            ),
-        };
+        let frames = zstd_frames(path, &compressed)?;
+        let size = frames.iter().map(|frame| frame.size).sum();
         #[cfg(target_os = "linux")]
-        return load_from_memory_file(engine, path, &compressed, size);
+        return load_from_memory_file(engine, path, &compressed, &frames, size);
         #[cfg(not(target_os = "linux"))]
         {
-            let bytes =
-                zstd::bulk::decompress(&compressed, usize::try_from(size)?).map_err(|error| {
-                    wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
-                })?;
+            let mut bytes = vec![0; size];
+            decompress_frames(path, &compressed, &frames, &mut bytes)?;
             // SAFETY: this private probe loads only the recorded trusted build artifacts.
             unsafe { Component::deserialize(engine, &bytes) }
         }
@@ -121,6 +110,101 @@ fn load_component(engine: &Engine, path: &std::path::Path) -> wasmtime::Result<C
         // SAFETY: this private probe loads only the recorded trusted build artifacts.
         unsafe { Component::deserialize_file(engine, path) }
     }
+}
+
+/// One zstd frame of a compressed component.
+struct Frame {
+    compressed: std::ops::Range<usize>,
+    size: usize,
+}
+
+/// Finds the zstd frames a compressed component is made of. Each frame must
+/// record its decompressed size.
+fn zstd_frames(path: &std::path::Path, compressed: &[u8]) -> wasmtime::Result<Vec<Frame>> {
+    let not_zstd = || {
+        wasmtime::format_err!(
+            "{} isn't a zstd file; compress the component with `zstd` or remove the .zst extension",
+            path.display()
+        )
+    };
+    if compressed.is_empty() {
+        return Err(not_zstd());
+    }
+    let mut frames = Vec::new();
+    let mut start = 0;
+    while start < compressed.len() {
+        let rest = &compressed[start..];
+        let size = match zstd::zstd_safe::get_frame_content_size(rest) {
+            Ok(Some(size)) => usize::try_from(size)?,
+            Ok(None) => wasmtime::bail!(
+                "{} doesn't record its decompressed size; compress it with the size included, as the `zstd` command does",
+                path.display()
+            ),
+            Err(_) => return Err(not_zstd()),
+        };
+        let length = zstd::zstd_safe::find_frame_compressed_size(rest).map_err(|_| {
+            wasmtime::format_err!(
+                "{} ends partway through a zstd frame; compress the component again",
+                path.display()
+            )
+        })?;
+        frames.push(Frame {
+            compressed: start..start + length,
+            size,
+        });
+        start += length;
+    }
+    Ok(frames)
+}
+
+/// Decompresses each frame into its own part of `output`, which holds exactly
+/// the frames' decompressed sizes. Frames run on as many threads as the
+/// instance has CPUs; Vercel's instances report two, and decompressing took
+/// most of a large component's load time on one.
+fn decompress_frames(
+    path: &std::path::Path,
+    compressed: &[u8],
+    frames: &[Frame],
+    output: &mut [u8],
+) -> wasmtime::Result<()> {
+    let mut parts = Vec::with_capacity(frames.len());
+    let mut rest = output;
+    for frame in frames {
+        let (part, after) = rest.split_at_mut(frame.size);
+        parts.push((frame, part));
+        rest = after;
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(frames.len());
+    let parts = Mutex::new(parts.into_iter());
+    let decompress = || -> wasmtime::Result<()> {
+        let mut decompressor = zstd::bulk::Decompressor::new()?;
+        loop {
+            let Some((frame, part)) = parts.lock().unwrap().next() else {
+                return Ok(());
+            };
+            let written = decompressor
+                .decompress_to_buffer(&compressed[frame.compressed.clone()], part)
+                .map_err(|error| {
+                    wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
+                })?;
+            wasmtime::ensure!(
+                written == frame.size,
+                "{} decompressed to fewer bytes than it records; compress the component again",
+                path.display()
+            );
+        }
+    };
+    std::thread::scope(|scope| {
+        let helpers: Vec<_> = (1..threads).map(|_| scope.spawn(decompress)).collect();
+        let mine = decompress();
+        helpers
+            .into_iter()
+            .map(|helper| helper.join().expect("decompressing a frame panicked"))
+            .chain([mine])
+            .collect()
+    })
 }
 
 /// Decompresses a component into an anonymous in-memory file and maps that
@@ -132,7 +216,8 @@ fn load_from_memory_file(
     engine: &Engine,
     path: &std::path::Path,
     compressed: &[u8],
-    size: u64,
+    frames: &[Frame],
+    size: usize,
 ) -> wasmtime::Result<Component> {
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
     // SAFETY: the name is a valid C string, and `file` takes ownership of the
@@ -147,16 +232,42 @@ fn load_from_memory_file(
         );
     }
     // SAFETY: `memfd_create` returned a new descriptor that nothing else owns.
-    let mut file = unsafe { std::fs::File::from_raw_fd(descriptor) };
-    zstd::stream::copy_decode(compressed, &mut file).map_err(|error| {
-        wasmtime::format_err!("couldn't decompress {}: {error}", path.display())
-    })?;
-    let written = file.metadata()?.len();
-    wasmtime::ensure!(
-        written == size,
-        "{} decompressed to {written} bytes but records {size}; compress the component again",
-        path.display()
-    );
+    let file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+    file.set_len(u64::try_from(size)?)?;
+    if size > 0 {
+        // SAFETY: maps the whole in-memory file, which only this function can
+        // reach until it returns. The mapping is removed before the file is
+        // deserialized.
+        let mapping = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if mapping == libc::MAP_FAILED {
+            wasmtime::bail!(
+                "couldn't map memory for {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            );
+        }
+        struct Unmap(*mut libc::c_void, usize);
+        impl Drop for Unmap {
+            fn drop(&mut self) {
+                // SAFETY: unmaps exactly the mapping created above, once.
+                unsafe { libc::munmap(self.0, self.1) };
+            }
+        }
+        let _unmap = Unmap(mapping, size);
+        // SAFETY: the mapping is `size` writable bytes, and nothing else
+        // refers to it while this slice lives.
+        let output = unsafe { std::slice::from_raw_parts_mut(mapping.cast::<u8>(), size) };
+        decompress_frames(path, compressed, frames, output)?;
+    }
     // SAFETY: this private probe loads only the recorded trusted build
     // artifacts, and nothing writes to the in-memory file after this point.
     unsafe { Component::deserialize_file(engine, format!("/proc/self/fd/{}", file.as_raw_fd())) }
