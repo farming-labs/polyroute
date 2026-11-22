@@ -1156,6 +1156,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "lambda_http",
+ "libc",
  "reqwest",
  "rustls",
  "serde",
