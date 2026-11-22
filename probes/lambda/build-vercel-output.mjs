@@ -1,6 +1,6 @@
 // Writes a Vercel Build Output (v3) directory with each benchmark route twice:
-// as a native `executable` function and as its TypeScript twin on Node. A
-// `/api/warmup` function serves the measurement harness.
+// as a native `executable` function and as its TypeScript twin on Node.
+// `/api/warmup` and `/api/load` serve the measurement harnesses.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -109,9 +109,17 @@ const warmup = path.join(output, "functions/api/warmup.func");
 const warmupCode = 'export function GET() {\n  return new Response("warm\\n");\n}\n';
 await write(path.join(warmup, "index.mjs"), Buffer.from(warmupCode));
 await write(path.join(warmup, ".vc-config.json"), JSON.stringify(nodeConfig, null, 2) + "\n");
+// `measure-vercel-load.mjs --from vercel` posts load runs here, so they start
+// inside the deployment's region instead of across the client's network.
+const loadFunction = path.join(output, "functions/api/load.func");
+await write(
+  path.join(loadFunction, "index.mjs"),
+  await readFile(path.join(probe, "load-function.mjs")),
+);
+await write(path.join(loadFunction, ".vc-config.json"), JSON.stringify(nodeConfig, null, 2) + "\n");
 await writeFile(
   path.join(output, "..", `${path.basename(output)}.files.json`),
   JSON.stringify({ host: digest(host), files }, null, 2) + "\n",
   { flag: "wx" },
 );
-console.log(`Wrote ${routes.length * 2 + 1} functions to ${output}.`);
+console.log(`Wrote ${routes.length * 2 + 2} functions to ${output}.`);
