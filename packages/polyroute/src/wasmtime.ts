@@ -4,7 +4,7 @@ import path from "node:path";
 import { PolyrouteError } from "./errors.js";
 
 /** Bump when the cached machine code's format, naming, or compiler settings change. */
-const CACHE_FORMAT = 2;
+const CACHE_FORMAT = 3;
 const ADDON_PACKAGE = "@farming-labs/polyroute-wasmtime";
 
 interface Addon {

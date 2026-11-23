@@ -40,6 +40,9 @@ fn engine() -> wasmtime::Result<&'static Engine> {
         .get_or_init(|| {
             let mut config = Config::new();
             config.macos_use_mach_ports(false);
+            // The addon compiles components without symbols, and loading
+            // requires the same setting.
+            config.debug_symbols(false);
             Engine::new(&config).map_err(|error| format!("{error:#}"))
         })
         .as_ref()
