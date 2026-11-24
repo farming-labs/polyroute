@@ -1,6 +1,6 @@
 # 0024: Compile routes without address maps or symbols
 
-Status: implemented, 2026-11-23. Local checks pass. Vercel measurement is in progress.
+Status: implemented, 2026-11-23. Local and CI checks pass. The x86_64 components are measured below. Start times on Vercel aren't measured: the probe project was paused when the comparison previews were deployed, and Vercel blocked them.
 
 ## Problem
 
@@ -26,6 +26,18 @@ The addon's engine compiles with `generate_address_map(false)` and `debug_symbol
 - **Keeping the address map** keeps offsets in backtraces. It accounts for about 2.5 MB of the 4 MB saved.
 - **A separate debug build** would keep offsets on demand. Nothing asks for that yet, and it would add a second cache key.
 - **Smaller Python components through componentize-py** remain possible. About 10.4 MB of the 17.7 MB component is the interpreter's pre-initialized heap, and 6 MB is the interpreter's code. This change doesn't touch either.
+
+## Sizes on x86_64
+
+CI built the Vercel output for `main` at `7655ad3` (run `45078259008`) and for this change (run `45293021210`). Each native function's `route.cwasm.zst`, compressed as shipped and decompressed:
+
+| Route  | `main` compressed |        This change | `main` decompressed |         This change |
+| ------ | ----------------: | -----------------: | ------------------: | ------------------: |
+| Rust   |           190,550 |   151,103 (−20.7%) |             683,168 |    532,520 (−22.1%) |
+| Go     |         3,743,403 | 3,130,220 (−16.4%) |          14,988,560 | 12,953,880 (−13.6%) |
+| Python |         9,020,317 | 7,563,069 (−16.2%) |          31,958,352 | 28,115,816 (−12.0%) |
+
+The host reads 1.46 MB less and decompresses 3.84 MB less for Python, and 0.61 MB and 2.03 MB less for Go. On 2026-11-22, Python's `load`, mostly decompressing, took 105 ms for 32 MB, and `prefetch` read about 15 MB in 47 ms. If both scale with bytes, Python's host phases would drop by about 17 ms and Go's by about 8 ms. That is an estimate, not a measurement.
 
 ## Verification
 
