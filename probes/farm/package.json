@@ -1,0 +1,10 @@
+{
+  "name": "polyroute-farm-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@farm.js/cli": "0.1.87",
+    "@farm.js/core": "0.1.87",
+    "@farming-labs/polyroute": "file:../../packages/polyroute"
+  }
+}
