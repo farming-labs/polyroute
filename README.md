@@ -401,6 +401,8 @@ A trapped request throws from `fetch`, so your framework's error handling decide
 
 For language comparisons, use `node scripts/bench.mjs --matched`. It pairs the Rust prime and relay routes, Go slug route, and Python statistics route with TypeScript implementations of the same workloads. Every paired response must match the same expected bytes. The greeting is a server overhead reference, not a substitute for these workload baselines.
 
+The [Farm production probe](probes/farm/README.md) packages one Rust route for a Farm Node server and a direct WASI HTTP host. Its [latency measurements](docs/benchmarks/2026-11-26-farm-route-output.md) include matched TypeScript, a repeated baseline, light and CPU-heavy requests, and local process starts.
+
 Use the same production app, inputs, machine, and connection count for each runtime. For example, after building both runtimes:
 
 ```bash
