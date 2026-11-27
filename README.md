@@ -14,7 +14,7 @@ app/api/
 
 The build writes a plain JavaScript server and, next to it, a `polyroute/` folder with each route's WebAssembly. Deploy both. The machine that runs them needs Node, nothing else: no Rust, Go, or Python toolchain, no wasmtime, no extra packages.
 
-> **Status:** early. Not published to npm yet.
+> **Experimental.** Install the prerelease with `pnpm add -D @farming-labs/polyroute@beta`.
 
 ## What it doesn't do
 
