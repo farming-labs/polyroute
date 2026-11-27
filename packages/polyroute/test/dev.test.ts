@@ -26,6 +26,28 @@ beforeAll(async () => {
   root = await realpath(await mkdtemp(path.join(tmpdir(), "polyroute-dev-")));
   routeFile = path.join(root, "route.rs");
   await copyFile(path.join(fixturesDir, "echo", "route.rs"), routeFile);
+  const nested = path.join(root, "api", "nested");
+  await mkdir(nested, { recursive: true });
+  const handler = await readFile(path.join(fixturesDir, "crate", "route.rs"), "utf8");
+  await writeFile(path.join(nested, "route.rs"), handler.replace("mod greeting;", ""));
+  const manifest = await readFile(path.join(fixturesDir, "crate", "Cargo.toml"), "utf8");
+  await writeFile(
+    path.join(nested, "Cargo.toml"),
+    manifest.replace(
+      "[dependencies]",
+      '[dependencies]\ngreeting = { path = "../../shared greeting" }',
+    ),
+  );
+  const sharedDir = path.join(root, "shared greeting");
+  await mkdir(path.join(sharedDir, "src"), { recursive: true });
+  await writeFile(
+    path.join(sharedDir, "Cargo.toml"),
+    '[package]\nname = "greeting"\nversion = "0.1.0"\nedition = "2024"\n',
+  );
+  await writeFile(
+    path.join(sharedDir, "src/lib.rs"),
+    'pub fn message() -> String { "before".into() }',
+  );
   pythonDir = path.join(root, "py");
   await mkdir(pythonDir);
   for (const file of ["route.py", "greeting.py"]) {
@@ -43,7 +65,7 @@ beforeAll(async () => {
   // The first build of each route is a cold build, which can take minutes
   // when other test files compile at the same time. It belongs to setup, so
   // the tests below time only the rebuild after an edit.
-  await Promise.all([loadRoute(), loadPythonRoute()]);
+  await Promise.all([loadRoute(), loadRoute("/api/nested/route.rs"), loadPythonRoute()]);
 });
 
 afterAll(async () => {
@@ -51,8 +73,8 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function loadRoute(): Promise<WasiHttpRoute> {
-  const module = (await server.ssrLoadModule("/route.rs")) as { default: WasiHttpRoute };
+async function loadRoute(id = "/route.rs"): Promise<WasiHttpRoute> {
+  const module = (await server.ssrLoadModule(id)) as { default: WasiHttpRoute };
   return module.default;
 }
 
@@ -60,6 +82,23 @@ async function loadPythonRoute(): Promise<WasiHttpRoute> {
   const module = (await server.ssrLoadModule("/py/route.py")) as { default: WasiHttpRoute };
   return module.default;
 }
+
+it("rebuilds a Rust route after a local Cargo path dependency changes", async () => {
+  const request = new Request("http://localhost/api/nested");
+  const routeId = "/api/nested/route.rs";
+  const before = await loadRoute(routeId);
+  expect(await (await before.fetch(request)).text()).toBe("before");
+  const shared = path.join(root, "shared greeting", "src", "lib.rs");
+  const changed = new Promise<void>((resolve) => {
+    onSsrUpdate = (file) => {
+      if (path.resolve(file) === shared) resolve();
+    };
+  });
+  await writeFile(shared, 'pub fn message() -> String { "after".into() }');
+  await changed;
+  const after = await loadRoute(routeId);
+  expect(await (await after.fetch(request)).text()).toBe("after");
+});
 
 it("serves a .rs route in dev and rebuilds it when the file changes", async () => {
   const before = await loadRoute();

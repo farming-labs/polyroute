@@ -5,6 +5,8 @@ export interface RouteBuildInput {
   routeFile: string;
   /** Root-relative path of the route, used in messages. */
   label: string;
+  /** Vite project root, for watching shared application sources. */
+  root?: string;
   /** polyroute's directory inside Vite's cache directory. */
   cacheDir: string;
   /** Runtime the built component must link against. Development uses jco. */

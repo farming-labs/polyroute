@@ -31,7 +31,12 @@ export function buildRustRoute(input: RouteBuildInput): Promise<RouteBuildResult
   return enqueue(() => build(input));
 }
 
-async function build({ routeFile, label, cacheDir }: RouteBuildInput): Promise<RouteBuildResult> {
+async function build({
+  routeFile,
+  label,
+  cacheDir,
+  root,
+}: RouteBuildInput): Promise<RouteBuildResult> {
   const routeDir = path.dirname(routeFile);
   const ownManifest = path.join(routeDir, "Cargo.toml");
   const manifestPath = existsSync(ownManifest)
@@ -79,7 +84,7 @@ async function build({ routeFile, label, cacheDir }: RouteBuildInput): Promise<R
   }
 
   const wasm = await readFile(executable);
-  const sources = await readDepInfo(executable.replace(/\.wasm$/, ".d"), routeDir);
+  const sources = await readDepInfo(executable.replace(/\.wasm$/, ".d"), routeDir, root, cacheDir);
   if (manifestPath === ownManifest) sources.push(ownManifest);
   return { wasm, sources };
 }
@@ -135,17 +140,34 @@ function findExecutable(stdout: string, routeFile: string): string | undefined {
   return undefined;
 }
 
-/** Reads cargo's dep-info file and keeps the sources that live next to the route. */
-async function readDepInfo(depInfoPath: string, routeDir: string): Promise<string[]> {
+function isInside(directory: string, file: string): boolean {
+  const relative = path.relative(directory, file);
+  return relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+}
+
+/** Cargo lists local path crates and generated build inputs together. Only watch source inputs. */
+async function readDepInfo(
+  depInfoPath: string,
+  routeDir: string,
+  root: string | undefined,
+  cacheDir: string,
+): Promise<string[]> {
   const content = await readFile(depInfoPath, "utf8").catch(() => undefined);
   if (content === undefined) return [];
   const firstLine = content.split("\n", 1)[0] ?? "";
   const separator = firstLine.indexOf(": ");
   if (separator === -1) return [];
-  const prefix = routeDir.endsWith(path.sep) ? routeDir : routeDir + path.sep;
+  // Rust can spell an explicit #[path] relative to the handler, including "..".
+  // Keep those module dependencies even when the route lives outside the app root.
+  const routePrefix = routeDir.endsWith(path.sep) ? routeDir : routeDir + path.sep;
   return firstLine
     .slice(separator + 2)
     .split(/(?<!\\) /)
     .map((file) => file.replaceAll("\\ ", " ").trim())
-    .filter((file) => file.length > 0 && file.startsWith(prefix));
+    .filter(
+      (file) =>
+        path.isAbsolute(file) &&
+        !isInside(cacheDir, file) &&
+        (file.startsWith(routePrefix) || (root !== undefined && isInside(root, file))),
+    );
 }

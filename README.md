@@ -107,6 +107,8 @@ serde_json = "1"
 
 polyroute builds that crate as it is. In dev, editing any of its source files rebuilds the route.
 
+During development, editing the source of a local Cargo path dependency under the Vite project root rebuilds the routes that use it. This also works when several routes share a crate outside their own directories.
+
 ### Go
 
 A Go route is a `main` package with its own module. Register a standard `net/http` handler with [`wasihttp`](https://github.com/bytecodealliance/go-wasi):

@@ -271,6 +271,7 @@ export function polyroute(options: PolyrouteOptions = {}): Plugin {
         const started = performance.now();
         const buildRuntime = config.command === "build" ? runtime : "jco";
         const { wasm, sources } = await language.build({
+          root: config.root,
           routeFile,
           label,
           cacheDir,
