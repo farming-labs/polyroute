@@ -62,6 +62,11 @@ fn engine() -> napi::Result<&'static Engine> {
             // code, and the process crashes with SIGILL. Signal handlers pass
             // a fault they don't own on to the one installed before them.
             config.macos_use_mach_ports(false);
+            // A server reads and maps each `.cwasm` before its route's first
+            // request. The address map only adds Wasm offsets to backtraces,
+            // and the symbol table only serves profilers.
+            config.generate_address_map(false);
+            config.debug_symbols(false);
             Engine::new(&config).map_err(|error| format!("{error:#}"))
         })
         .as_ref()
@@ -108,6 +113,7 @@ mod cpu_baseline_tests {
         let mut config = Config::new();
         config.target(TARGET).unwrap();
         config.macos_use_mach_ports(false);
+        config.debug_symbols(false);
         config.enable_compiler(false);
         // SAFETY: reporting every optional feature unavailable only restricts
         // execution; it never enables instructions this CPU cannot run.
@@ -121,6 +127,21 @@ mod cpu_baseline_tests {
             .get_typed_func::<(), i32>(&mut store, "run")
             .unwrap();
         assert_eq!(run.call(&mut store, ()).unwrap(), 42);
+    }
+
+    #[test]
+    fn precompiled_code_has_no_address_map_or_symbol_table() {
+        // This module exports `run() -> i32`, which returns 42.
+        let wasm = [
+            0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0, 7, 7, 1, 3, 114, 117,
+            110, 0, 0, 10, 6, 1, 4, 0, 65, 42, 11,
+        ];
+        let compiled = engine().unwrap().precompile_module(&wasm).unwrap();
+        let contains = |name: &[u8]| compiled.windows(name.len()).any(|bytes| bytes == name);
+        assert!(!contains(b".wasmtime.addrmap\0"));
+        // The ELF file keeps an empty symbol table; each function's symbol is
+        // named like this one.
+        assert!(!contains(b"wasm[0]::function[0]"));
     }
 }
 
