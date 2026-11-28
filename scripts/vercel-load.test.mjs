@@ -17,7 +17,8 @@ const spec = { path: "/api/work", body: "done\n", connections: 2, durationMs: 30
 test("A load run counts checked responses and the guest time native functions report", async (t) => {
   let first = true;
   const origin = await server(t, (req, res) => {
-    const timing = (first ? "prefetch;dur=1.00, wait;dur=8.50, " : "") + "call;dur=0.70";
+    const startup = 'prefetch;dur=1.00, wait;dur=8.50, cpu;desc="Test \\"CPU\\", 2.90GHz", ';
+    const timing = (first ? startup : "") + "call;dur=0.70";
     first = false;
     res.writeHead(200, { "server-timing": timing }).end("done\n");
   });
@@ -26,7 +27,20 @@ test("A load run counts checked responses and the guest time native functions re
   assert.ok(result.p50Ms <= result.p95Ms && result.p95Ms <= result.p99Ms);
   assert.equal(result.callP50Ms, 0.7);
   assert.deepEqual(result.instanceWaits, [8.5]);
+  assert.deepEqual(result.instanceCpus, ['Test "CPU", 2.90GHz']);
   assert.deepEqual(result.errors, {});
+});
+
+test("A load run records a null processor for an instance that names none", async (t) => {
+  let first = true;
+  const origin = await server(t, (req, res) => {
+    const timing = (first ? "wait;dur=3.00, " : "") + "call;dur=0.70";
+    first = false;
+    res.writeHead(200, { "server-timing": timing }).end("done\n");
+  });
+  const result = await load({ origin, spec });
+  assert.deepEqual(result.instanceWaits, [3]);
+  assert.deepEqual(result.instanceCpus, [null]);
 });
 
 test("A load run counts 503 responses as errors and keeps going", async (t) => {
@@ -73,5 +87,9 @@ test("The deployed load function refuses requests without the bypass secret", as
   assert.equal((await post(headers, { ...spec, connections: 500 })).status, 400);
   const response = await post(headers);
   assert.equal(response.status, 200);
-  assert.ok((await response.json()).requestsPerSecond > 0);
+  const result = await response.json();
+  assert.ok(result.requestsPerSecond > 0);
+  // Linux names the processor in `/proc/cpuinfo`; other systems report none.
+  if (process.platform === "linux") assert.equal(typeof result.generatorCpuModel, "string");
+  else assert.equal(result.generatorCpuModel, null);
 });

@@ -7,6 +7,7 @@
 // connections. Requests that finish inside the `durationMs` window after
 // `warmupMs` count. Every 200 response's body is checked.
 import { lookup } from "node:dns/promises";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 
@@ -70,7 +71,7 @@ export async function load({ origin, spec, headers = {} }) {
   let failure;
   const latencies = [];
   const calls = [];
-  const result = { errors: {}, warmupErrors: {}, instanceWaits: [] };
+  const result = { errors: {}, warmupErrors: {}, instanceWaits: [], instanceCpus: [] };
   const cpu = process.cpuUsage();
   const start = performance.now();
   const from = start + spec.warmupMs;
@@ -98,13 +99,18 @@ export async function load({ origin, spec, headers = {} }) {
         break;
       }
       // Native functions built with `serverTiming` report `call` on every
-      // response, and each instance reports `wait` on its first one.
+      // response, and each instance reports `wait` on its first one, with
+      // its processor as `cpu` on Linux.
       const phases = r.timing
         ? Object.fromEntries(
             [...r.timing.matchAll(/(\w+);dur=([\d.]+)/g)].map(([, name, ms]) => [name, Number(ms)]),
           )
         : undefined;
-      if (phases?.wait !== undefined) result.instanceWaits.push(phases.wait);
+      if (phases?.wait !== undefined) {
+        result.instanceWaits.push(phases.wait);
+        const model = /(?:^|,)\s*cpu;desc="((?:[^"\\]|\\.)*)"/.exec(r.timing)?.[1];
+        result.instanceCpus.push(model?.replace(/\\(.)/g, "$1") ?? null);
+      }
       if (!counted) continue;
       latencies.push(r.ms);
       if (phases?.call !== undefined) calls.push(phases.call);
@@ -164,5 +170,10 @@ export async function POST(request) {
     );
   const origin = new URL(request.url).origin;
   const result = await load({ origin, spec, headers: { "x-vercel-protection-bypass": secret } });
-  return Response.json(result);
+  // The processor this Node function ran on, to compare with the instances it loaded.
+  const generatorCpuModel = await readFile("/proc/cpuinfo", "utf8").then(
+    (cpuinfo) => /^model name\s*:\s*(\S.*?)\s*$/m.exec(cpuinfo)?.[1] ?? null,
+    () => null,
+  );
+  return Response.json({ ...result, generatorCpuModel });
 }

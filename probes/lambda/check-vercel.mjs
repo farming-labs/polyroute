@@ -217,16 +217,29 @@ await check("Readiness is reported once, before any request", async () => {
 });
 
 // `serverTiming` names each phase; `instantiate` appears only when the request
-// itself had to create an instance.
+// itself had to create an instance. A quoted `desc` may hold any text.
 const phases = (r) =>
-  (r.headers["server-timing"] ?? "").split(", ").map((metric) => metric.split(";")[0]);
+  (r.headers["server-timing"] ?? "")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .split(", ")
+    .map((metric) => metric.split(";")[0]);
+// On Linux the first response also names the processor, as `/proc/cpuinfo` does.
+const cpuModel = await readFile("/proc/cpuinfo", "utf8").then(
+  (cpuinfo) => /^model name\s*:\s*(\S.*?)\s*$/m.exec(cpuinfo)?.[1],
+  () => undefined,
+);
+const firstPhases = ["prefetch", "load", "prepare", "wait", ...(cpuModel ? ["cpu"] : []), "call"];
 
 await check("The first request uses an instance created before readiness", async () => {
   const h = await start({ component: fixtures["counter/route.rs"].component, serverTiming: true });
   try {
     const first = await h.request();
     assert.equal(first.text, "1");
-    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+    assert.deepEqual(phases(first), firstPhases);
+    if (cpuModel) {
+      const quoted = `"${cpuModel.replace(/["\\]/g, "\\$&")}"`;
+      assert.ok(first.headers["server-timing"].includes(`cpu;desc=${quoted}`));
+    }
     const second = await h.request();
     assert.equal(second.text, "2");
     assert.deepEqual(phases(second), ["call"]);
@@ -255,7 +268,7 @@ await check("An outbound route's first request uses the prepared instance", asyn
     });
     assert.equal(first.status, 200, h.logs);
     assert.equal(first.text, "upstream");
-    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+    assert.deepEqual(phases(first), firstPhases);
   } finally {
     assert.equal(await h.stop(), 0);
     await new Promise((resolve) => upstream.close(resolve));
@@ -271,7 +284,7 @@ await check("Per-request instances are still created for every later request", a
   try {
     const first = await h.request();
     assert.equal(first.text, "1");
-    assert.deepEqual(phases(first), ["prefetch", "load", "prepare", "wait", "call"]);
+    assert.deepEqual(phases(first), firstPhases);
     const second = await h.request();
     assert.equal(second.text, "1");
     assert.deepEqual(phases(second), ["instantiate", "call"]);

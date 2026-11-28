@@ -330,6 +330,15 @@ impl NativeRoute {
             }
             let wait = arrived.saturating_duration_since(startup.ready_at);
             metrics.push(format!("wait;dur={:.2}", ms(wait)));
+            // Providers place instances on different processors, and a guest's
+            // compute time follows the processor.
+            if let Some(model) = std::fs::read_to_string("/proc/cpuinfo")
+                .ok()
+                .as_deref()
+                .and_then(cpu_model)
+            {
+                metrics.push(format!("cpu;desc={}", quoted_string(model)));
+            }
         }
         if let Some(instantiate) = result.instantiate {
             metrics.push(format!("instantiate;dur={:.2}", ms(instantiate)));
@@ -423,5 +432,47 @@ impl NativeRoute {
             result.body
         };
         Ok(response.body(body)?)
+    }
+}
+
+/// The processor's model name from `/proc/cpuinfo`, as x86 Linux reports it.
+fn cpu_model(cpuinfo: &str) -> Option<&str> {
+    cpuinfo.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        let value = value.trim();
+        (key.trim() == "model name" && !value.is_empty()).then_some(value)
+    })
+}
+
+/// An HTTP quoted-string, as a `Server-Timing` `desc` takes it.
+fn quoted_string(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        if matches!(character, '"' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(character);
+    }
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+
+    #[test]
+    fn cpu_model_reads_the_first_processor_model_name() {
+        let cpuinfo = "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel\t\t: 85\nmodel name\t: Intel(R) Xeon(R) Processor @ 2.90GHz\n\nprocessor\t: 1\nmodel name\t: Intel(R) Xeon(R) Processor @ 2.90GHz\n";
+        assert_eq!(cpu_model(cpuinfo), Some("Intel(R) Xeon(R) Processor @ 2.90GHz"));
+        assert_eq!(cpu_model("processor\t: 0\nCPU part\t: 0xd0c\n"), None);
+        assert_eq!(cpu_model("model name\t:\n"), None);
+    }
+
+    #[test]
+    fn quoted_string_escapes_quotes_and_backslashes() {
+        assert_eq!(quoted_string("AMD EPYC 7R13"), "\"AMD EPYC 7R13\"");
+        assert_eq!(quoted_string(r#"a "b" \c"#), r#""a \"b\" \\c""#);
     }
 }
