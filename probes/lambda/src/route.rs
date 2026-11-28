@@ -465,7 +465,10 @@ mod route_tests {
     #[test]
     fn cpu_model_reads_the_first_processor_model_name() {
         let cpuinfo = "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel\t\t: 85\nmodel name\t: Intel(R) Xeon(R) Processor @ 2.90GHz\n\nprocessor\t: 1\nmodel name\t: Intel(R) Xeon(R) Processor @ 2.90GHz\n";
-        assert_eq!(cpu_model(cpuinfo), Some("Intel(R) Xeon(R) Processor @ 2.90GHz"));
+        assert_eq!(
+            cpu_model(cpuinfo),
+            Some("Intel(R) Xeon(R) Processor @ 2.90GHz")
+        );
         assert_eq!(cpu_model("processor\t: 0\nCPU part\t: 0xd0c\n"), None);
         assert_eq!(cpu_model("model name\t:\n"), None);
     }
